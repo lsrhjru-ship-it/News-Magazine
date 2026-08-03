@@ -21,14 +21,17 @@ function getCategoryIcon(catName) {
 }
 
 /* ===== DOM Loaded Initialization ===== */
-document.addEventListener('DOMContentLoaded', async () => {
+document.addEventListener('DOMContentLoaded', () => {
   initTheme();
   renderCategoryNav();
   renderHeaderUserUI();
   setupEventListeners();
 
-  await fetchWeatherAndAutoCreateNews();
+  // 1. 기사 목록을 0초만에 화면에 즉시 렌더링
   renderArticles();
+
+  // 2. 날씨 API 및 GPS 수신은 백그라운드에서 비동기로 수행 (화면 로딩 차단 해제)
+  fetchWeatherAndAutoCreateNews();
 });
 
 /* ===== Theme Control (다크/라이트 모드) ===== */
@@ -69,7 +72,8 @@ async function fetchWeatherAndAutoCreateNews() {
   if (navigator.geolocation) {
     try {
       const position = await new Promise((resolve, reject) => {
-        navigator.geolocation.getCurrentPosition(resolve, reject, { timeout: 4000 });
+        // GPS 대기 시간을 1.5초로 줄여 비동기 응답 속도 최적화
+        navigator.geolocation.getCurrentPosition(resolve, reject, { timeout: 1500 });
       });
       lat = position.coords.latitude;
       lon = position.coords.longitude;
@@ -119,6 +123,9 @@ async function fetchWeatherAndAutoCreateNews() {
 
         articles.unshift(weatherArticle);
         localStorage.setItem('articles', JSON.stringify(articles));
+        
+        // 날씨 기사가 자동 생성되었을 때만 화면 갱신
+        renderArticles();
       }
     }
   } catch (err) {
@@ -196,7 +203,7 @@ window.openWriteModal = function (articleId = null) {
   const form = document.getElementById('articleForm');
 
   editingArticleId = articleId;
-  clearImagePreview(); // 기존 선택 이미지 미리보기 초기화
+  clearImagePreview();
 
   if (articleId) {
     const article = articles.find(a => a.id === Number(articleId));
@@ -207,7 +214,6 @@ window.openWriteModal = function (articleId = null) {
       if (document.getElementById('artAuthor')) document.getElementById('artAuthor').value = article.author;
       if (document.getElementById('artContent')) document.getElementById('artContent').value = article.content;
 
-      // 기존 기사에 이미지가 존재한다면 미리보기 표시
       if (article.image) {
         const previewImg = document.getElementById('imagePreview');
         const uploadArea = document.getElementById('uploadArea');
@@ -250,7 +256,7 @@ window.openDetailModal = function (articleId) {
 
   if (detailContent) {
     detailContent.innerHTML = `
-      ${article.image ? `<img src="${article.image}" style="width: 100%; max-height: 320px; object-fit: cover; border-radius: 12px; margin-bottom: 20px;" alt="${article.title}">` : ''}
+      ${article.image ? `<img src="${article.image}" style="width: 100%; max-height: 320px; object-fit: cover; border-radius: 12px; margin-bottom: 20px;" alt="${article.title}" loading="lazy">` : ''}
       <div style="margin-bottom: 12px;">
         <span class="badge" style="background: rgba(255,255,255,0.08); border:1px solid var(--border-color); color: var(--accent-gold); padding: 4px 10px; border-radius: 20px; font-size: 0.85rem;">${icon} ${article.category}</span>
       </div>
@@ -338,7 +344,7 @@ function renderArticles() {
       <div class="article-card" onclick="openDetailModal(${article.id})" style="cursor:pointer;">
         <div class="article-card-img-container">
           ${article.image
-        ? `<img src="${article.image}" class="article-card-img" alt="${article.title}">`
+        ? `<img src="${article.image}" class="article-card-img" alt="${article.title}" loading="lazy">`
         : `<div class="article-card-img-placeholder" style="font-size:2rem; text-align:center; padding: 30px;">${icon}</div>`
       }
         </div>
@@ -464,7 +470,6 @@ function setupEventListeners() {
 
       if (fileInput && fileInput.files && fileInput.files[0]) {
         try {
-          // 이미지 축소 및 압축 후 Base64 변환
           finalImage = await readImageFile(fileInput.files[0]);
         } catch (err) {
           console.error('이미지 읽기 실패', err);
@@ -482,7 +487,7 @@ function setupEventListeners() {
             if (finalImage) {
               updatedImage = finalImage;
             } else if (!isPreviewVisible) {
-              updatedImage = ''; // 미리보기 제거 상태면 기존 이미지 삭제
+              updatedImage = '';
             }
             return { ...a, title, category, author, content, image: updatedImage };
           }
@@ -516,13 +521,11 @@ function setupEventListeners() {
     });
   }
 
-  // 이미지 선택(change) 리스너 등록
   setupImageInputListener();
 }
 
 /* ===== Image Handling & Preview ===== */
 
-// 파일 입력 선택 시 미리보기 표시
 function setupImageInputListener() {
   const fileInput = document.getElementById('imageInput');
   const uploadArea = document.getElementById('uploadArea');
@@ -545,7 +548,6 @@ function setupImageInputListener() {
   });
 }
 
-// 이미지 미리보기 초기화 (HTML ✕ 버튼 연동)
 window.clearImagePreview = function () {
   const fileInput = document.getElementById('imageInput');
   const uploadArea = document.getElementById('uploadArea');
@@ -558,7 +560,6 @@ window.clearImagePreview = function () {
   if (uploadArea) uploadArea.style.display = 'block';
 };
 
-// Canvas를 활용하여 대용량 이미지를 자동으로 800px 축소 및 JPEG 70% 압축
 function readImageFile(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -568,7 +569,7 @@ function readImageFile(file) {
         const canvas = document.createElement('canvas');
         let width = img.width;
         let height = img.height;
-        const maxWidth = 800; // 가로 최대 800px 축소
+        const maxWidth = 800;
 
         if (width > maxWidth) {
           height = Math.round((height * maxWidth) / width);
@@ -581,7 +582,6 @@ function readImageFile(file) {
         const ctx = canvas.getContext('2d');
         ctx.drawImage(img, 0, 0, width, height);
 
-        // JPEG 70% 품질 압축 (localStorage 5MB 한계 대응)
         resolve(canvas.toDataURL('image/jpeg', 0.7));
       };
       img.onerror = error => reject(error);
