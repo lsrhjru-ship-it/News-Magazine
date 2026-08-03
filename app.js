@@ -20,7 +20,7 @@ db.exec(`
     username TEXT UNIQUE NOT NULL,
     password TEXT NOT NULL,
     name TEXT NOT NULL,
-    role TEXT DEFAULT 'admin'
+    role TEXT DEFAULT 'user'
   );
 
   CREATE TABLE IF NOT EXISTS articles (
@@ -34,14 +34,14 @@ db.exec(`
   );
 `);
 
-// users 테이블에 role 칼럼이 없는 경우를 대비한 자동 추가
+// role 컬럼 존재 여부 확인 및 추가
 try {
-  db.exec(`ALTER TABLE users ADD COLUMN role TEXT DEFAULT 'admin';`);
+  db.exec(`ALTER TABLE users ADD COLUMN role TEXT DEFAULT 'user';`);
 } catch (e) {
-  // 칼럼이 이미 존재하면 무시
+  // 이미 컬럼이 존재하면 무시
 }
 
-// 기본 관리자 계정 생성 및 권한 보장
+// 기본 관리자 계정 생성 및 admin 권한 부여
 const initAdmin = async () => {
   const adminUser = process.env.ADMIN_USERNAME || 'lsrhjru';
   const adminPass = process.env.ADMIN_PASSWORD || 'lsr37733*';
@@ -54,7 +54,7 @@ const initAdmin = async () => {
     console.log('✅ 관리자 계정이 새로 생성되었습니다.');
   } else {
     db.prepare('UPDATE users SET role = ? WHERE username = ?').run('admin', adminUser);
-    console.log('✅ 관리자 계정 권한이 보장되었습니다.');
+    console.log('✅ 관리자 권한이 보장되었습니다.');
   }
 };
 initAdmin();
@@ -64,7 +64,7 @@ app.use(cors());
 app.use(express.json());
 app.use(express.static(path.join(__dirname)));
 
-// JWT 검증 미들웨어
+// 1. JWT 토큰 유효성 검증 미들웨어
 const authenticateToken = (req, res, next) => {
   const authHeader = req.headers['authorization'];
   const token = authHeader && authHeader.split(' ')[1];
@@ -78,9 +78,26 @@ const authenticateToken = (req, res, next) => {
   });
 };
 
+// 2. 🔑 관리자(Admin) 권한 검증 미들웨어
+const requireAdmin = (req, res, next) => {
+  const adminUsername = process.env.ADMIN_USERNAME || 'lsrhjru';
+
+  // 요청자의 username이 관리자 아이디이거나 role이 'admin'인 경우만 허용
+  const isAdmin = req.user && (
+    req.user.username === adminUsername || 
+    req.user.role === 'admin' || 
+    req.user.isAdmin === true
+  );
+
+  if (!isAdmin) {
+    return res.status(403).json({ message: '⛔ 관리자만 삭제 및 수정이 가능합니다.' });
+  }
+  next();
+};
+
 // --- API 라우트 ---
 
-// 1. 로그인 (JWT 토큰 내부 + 응답값 모두에 관리자 권한 포함)
+// 1. 로그인
 app.post('/api/auth/login', async (req, res) => {
   const { username, password } = req.body;
   try {
@@ -94,29 +111,27 @@ app.post('/api/auth/login', async (req, res) => {
       return res.status(401).json({ message: '아이디 또는 비밀번호가 올바르지 않습니다.' });
     }
 
-    // app.js가 요구할 수 있는 모든 형태의 권한 객체 구성
-    const authPayload = {
+    const adminUsername = process.env.ADMIN_USERNAME || 'lsrhjru';
+    const isAdmin = (user.username === adminUsername || user.role === 'admin');
+    const role = isAdmin ? 'admin' : 'user';
+
+    const userData = {
       id: user.id,
       username: user.username,
       name: user.name,
-      role: 'admin',
-      isAdmin: true,
-      admin: true,
-      is_admin: 1,
-      type: 'admin'
+      role: role,
+      isAdmin: isAdmin,
+      admin: isAdmin
     };
 
-    // 🔑 JWT 토큰 내부에도 권한 정보를 완전히 채워서 발급
-    const token = jwt.sign(authPayload, JWT_SECRET, { expiresIn: '12h' });
+    const token = jwt.sign(userData, JWT_SECRET, { expiresIn: '12h' });
 
-    // HTTP 응답 바디에도 전파
     res.json({
       token,
-      user: authPayload,
-      ...authPayload
+      user: userData,
+      ...userData
     });
   } catch (error) {
-    console.error(error);
     res.status(500).json({ message: '서버 에러가 발생했습니다.' });
   }
 });
@@ -142,10 +157,10 @@ app.get('/api/articles/:id', (req, res) => {
   }
 });
 
-// 4. 게시글 작성
+// 4. 게시글 작성 (로그인한 유저 누구나 가능)
 app.post('/api/articles', authenticateToken, (req, res) => {
   const { category, title, content, summary } = req.body;
-  const author = req.user.name || '관리자';
+  const author = req.user.name;
   const date = new Date().toISOString().split('T')[0];
 
   try {
@@ -159,8 +174,8 @@ app.post('/api/articles', authenticateToken, (req, res) => {
   }
 });
 
-// 5. 게시글 수정
-app.put('/api/articles/:id', authenticateToken, (req, res) => {
+// 5. 게시글 수정 (🔒 관리자 전용 : authenticateToken + requireAdmin)
+app.put('/api/articles/:id', authenticateToken, requireAdmin, (req, res) => {
   const { category, title, content, summary } = req.body;
   try {
     const result = db.prepare(
@@ -174,8 +189,8 @@ app.put('/api/articles/:id', authenticateToken, (req, res) => {
   }
 });
 
-// 6. 게시글 삭제
-app.delete('/api/articles/:id', authenticateToken, (req, res) => {
+// 6. 게시글 삭제 (🔒 관리자 전용 : authenticateToken + requireAdmin)
+app.delete('/api/articles/:id', authenticateToken, requireAdmin, (req, res) => {
   try {
     const result = db.prepare('DELETE FROM articles WHERE id = ?').run(req.params.id);
     if (result.changes === 0) return res.status(404).json({ message: '게시글을 찾을 수 없습니다.' });
