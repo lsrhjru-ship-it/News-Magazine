@@ -1,271 +1,302 @@
-// ==========================================
-// 🔗 백엔드 서버 주소 설정
-// ==========================================
-const API_BASE_URL = 'https://se-eaib.onrender.com';
+/* ===== App State ===== */
+// 처음에 로컬스토리지에 저장된 데이터가 없으면 빈 배열([])로 시작합니다.
+let articles = JSON.parse(localStorage.getItem('articles')) || [];
+let currentUser = JSON.parse(localStorage.getItem('currentUser')) || null;
+let currentCategory = '전체';
+let searchQuery = '';
+let editingArticleId = null;
 
-let articles = [];
-
-// 페이지 로드 시 초기화 및 데이터 불러오기
+/* ===== DOM Loaded Initialization ===== */
 document.addEventListener('DOMContentLoaded', () => {
-  checkAuth();
-  fetchArticles();
-
-  // 폼 이벤트 바인딩
-  const loginForm = document.getElementById('loginForm');
-  if (loginForm) loginForm.addEventListener('submit', handleLogin);
-
-  const articleForm = document.getElementById('articleForm');
-  if (articleForm) articleForm.addEventListener('submit', saveArticle);
+  renderHeaderUserUI();
+  renderArticles();
+  setupEventListeners();
 });
 
-// --- 인증 관리 ---
-function checkAuth() {
-  const token = localStorage.getItem('token');
-  const user = JSON.parse(localStorage.getItem('user') || 'null');
+/* ===== Global Functions (HTML onclick 바인딩용) ===== */
 
-  const loginBtn = document.getElementById('loginBtn');
-  const userArea = document.getElementById('userArea');
-  const userNameDisplay = document.getElementById('userNameDisplay');
-  const writeBtn = document.getElementById('writeBtn');
+// 1. 모달 제어 함수
+window.openLoginModal = function () {
+  const modal = document.getElementById('loginModal');
+  if (modal) modal.classList.add('active');
+};
 
-  if (token && user) {
-    if (loginBtn) loginBtn.style.display = 'none';
-    if (userArea) {
-      userArea.style.display = 'flex';
-      if (userNameDisplay) userNameDisplay.textContent = user.username || user.name || '관리자';
+window.closeLoginModal = function () {
+  const modal = document.getElementById('loginModal');
+  if (modal) modal.classList.remove('active');
+};
+
+window.openWriteModal = function (articleId = null) {
+  const modal = document.getElementById('writeModal');
+  const title = document.getElementById('writeModalTitle');
+  const form = document.getElementById('articleForm');
+
+  editingArticleId = articleId;
+
+  if (articleId) {
+    const article = articles.find(a => a.id === articleId);
+    if (article) {
+      if (title) title.textContent = '기사 수정';
+      document.getElementById('inputTitle').value = article.title;
+      document.getElementById('selectCategory').value = article.category;
+      document.getElementById('inputExcerpt').value = article.excerpt || '';
+      document.getElementById('textContent').value = article.content;
+      document.getElementById('inputImageUrl').value = article.image || '';
     }
-    if (writeBtn) writeBtn.style.display = 'inline-flex';
   } else {
-    if (loginBtn) loginBtn.style.display = 'inline-flex';
-    if (userArea) userArea.style.display = 'none';
-    if (writeBtn) writeBtn.style.display = 'none';
+    if (title) title.textContent = '새 기사 작성';
+    if (form) form.reset();
   }
-}
 
-// 로그인 처리
-async function handleLogin(e) {
-  e.preventDefault();
-  const idInput = document.getElementById('loginId').value;
-  const pwInput = document.getElementById('loginPw').value;
-  const loginError = document.getElementById('loginError');
+  if (modal) modal.classList.add('active');
+};
 
-  try {
-    const res = await fetch(`${API_BASE_URL}/api/auth/login`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username: idInput, password: pwInput })
-    });
+window.closeWriteModal = function () {
+  const modal = document.getElementById('writeModal');
+  if (modal) modal.classList.remove('active');
+  editingArticleId = null;
+};
 
-    const data = await res.json();
-    if (res.ok) {
-      localStorage.setItem('token', data.token);
-      localStorage.setItem('user', JSON.stringify(data.user));
-      alert('로그인되었습니다.');
-      closeLoginModal();
-      checkAuth();
-      fetchArticles();
-    } else {
-      if (loginError) {
-        loginError.style.display = 'block';
-        loginError.textContent = data.message || '로그인에 실패했습니다.';
-      } else {
-        alert(data.message || '로그인에 실패했습니다.');
-      }
-    }
-  } catch (err) {
-    alert('서버와 통신하는 중 오류가 발생했습니다.');
+window.openDetailModal = function (articleId) {
+  const article = articles.find(a => a.id === articleId);
+  if (!article) return;
+
+  article.views = (article.views || 0) + 1;
+  localStorage.setItem('articles', JSON.stringify(articles));
+  renderArticles();
+
+  const modal = document.getElementById('detailModal');
+  const body = document.getElementById('detailModalBody');
+
+  if (body) {
+    body.innerHTML = `
+      ${article.image ? `<img src="${article.image}" class="detail-hero-img" alt="${article.title}">` : ''}
+      <div class="detail-body">
+        <div class="detail-category">
+          <span class="badge badge-${article.category}">${article.category}</span>
+        </div>
+        <h2 class="detail-title">${article.title}</h2>
+        <div class="detail-meta">
+          <span>작성자: <strong>${article.author}</strong></span>
+          <span>•</span>
+          <span>${article.date}</span>
+          <span>•</span>
+          <span>조회수 ${article.views}</span>
+        </div>
+        <div class="detail-content">${article.content}</div>
+      </div>
+    `;
   }
-}
 
-// 로그아웃 처리
-function logout() {
-  localStorage.removeItem('token');
-  localStorage.removeItem('user');
-  alert('로그아웃되었습니다.');
-  checkAuth();
-  fetchArticles();
-}
+  if (modal) modal.classList.add('active');
+};
 
-// --- 게시글 CRUD ---
+window.closeDetailModal = function () {
+  const modal = document.getElementById('detailModal');
+  if (modal) modal.classList.remove('active');
+};
 
-// 게시글 목록 불러오기
-async function fetchArticles() {
-  try {
-    const res = await fetch(`${API_BASE_URL}/api/articles`);
-    articles = await res.json();
-    renderArticles(articles);
-  } catch (err) {
-    console.error('게시글 불러오기 실패:', err);
-  }
-}
+// 2. 기사 삭제 및 수정
+window.deleteArticle = function (id, event) {
+  if (event) event.stopPropagation();
+  if (!confirm('정말 이 기사를 삭제하시겠습니까?')) return;
 
-// 게시글 렌더링
-function renderArticles(list) {
-  const container = document.getElementById('articlesGrid');
+  articles = articles.filter(a => a.id !== id);
+  localStorage.setItem('articles', JSON.stringify(articles));
+  renderArticles();
+  showToast('기사가 삭제되었습니다.', 'info');
+};
+
+window.editArticle = function (id, event) {
+  if (event) event.stopPropagation();
+  window.openWriteModal(id);
+};
+
+// 3. 카테고리 변경
+window.setCategory = function (category) {
+  currentCategory = category;
+  document.querySelectorAll('.cat-btn').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.category === category);
+  });
+  renderArticles();
+};
+
+/* ===== UI Render Functions ===== */
+function renderHeaderUserUI() {
+  const container = document.getElementById('userAuthContainer');
   if (!container) return;
 
-  container.innerHTML = '';
-  if (!Array.isArray(list) || list.length === 0) {
-    container.innerHTML = '<p class="no-data">등록된 게시글이 없습니다.</p>';
+  if (currentUser) {
+    container.innerHTML = `
+      <div class="user-badge">
+        <span class="user-avatar">👤</span>
+        <span class="user-name">${currentUser.name}</span>
+      </div>
+      <button class="btn btn-ghost" onclick="logout()">로그아웃</button>
+    `;
+  } else {
+    container.innerHTML = `
+      <button class="btn btn-ghost" onclick="openLoginModal()">로그인</button>
+    `;
+  }
+}
+
+function renderArticles() {
+  const grid = document.getElementById('articlesGrid');
+  if (!grid) return;
+
+  let filtered = articles;
+
+  if (currentCategory !== '전체') {
+    filtered = filtered.filter(a => a.category === currentCategory);
+  }
+
+  if (searchQuery.trim()) {
+    const q = searchQuery.toLowerCase();
+    filtered = filtered.filter(a =>
+      a.title.toLowerCase().includes(q) ||
+      a.content.toLowerCase().includes(q)
+    );
+  }
+
+  // 데이터가 없을 때 표시될 UI
+  if (filtered.length === 0) {
+    grid.innerHTML = `
+      <div class="empty-state">
+        <div class="empty-icon">📰</div>
+        <div class="empty-title">작성된 기사가 없습니다</div>
+        <div class="empty-desc">우측 상단의 '기사 작성' 버튼을 눌러 첫 기사를 올려보세요!</div>
+        <button class="btn btn-gold" onclick="openWriteModal()">기사 작성하기</button>
+      </div>
+    `;
     return;
   }
 
-  const token = localStorage.getItem('token');
-
-  list.forEach(article => {
-    const card = document.createElement('div');
-    card.className = 'article-card';
-    card.innerHTML = `
-      <span class="category-tag">${escapeHtml(article.category)}</span>
-      <h3>${escapeHtml(article.title)}</h3>
-      <p class="summary">${escapeHtml(article.summary || (article.content ? article.content.substring(0, 100) : ''))}</p>
-      <div class="meta">
-        <span>${escapeHtml(article.author || '익명')}</span> | <span>${article.created_at || article.date || ''}</span>
+  grid.innerHTML = filtered.map(article => `
+    <div class="article-card fade-in-up" onclick="openDetailModal(${article.id})">
+      <div class="article-card-img-container">
+        ${article.image 
+          ? `<img src="${article.image}" class="article-card-img" alt="${article.title}">`
+          : `<div class="article-card-img-placeholder">📰</div>`
+        }
       </div>
-      ${token ? `
-        <div class="card-actions" style="margin-top:10px;display:flex;gap:8px">
-          <button class="btn btn-ghost" onclick="editArticle(${article.id})">수정</button>
-          <button class="btn btn-ghost" onclick="deleteArticle(${article.id})">삭제</button>
+      <div class="article-card-body">
+        <span class="badge badge-${article.category}">${article.category}</span>
+        <h3 class="article-card-title">${article.title}</h3>
+        <p class="article-card-excerpt">${article.excerpt || article.content.substring(0, 60)}...</p>
+        <div class="article-card-meta">
+          <div class="article-card-meta-left">
+            <span>${article.author}</span>
+            <span class="meta-dot"></span>
+            <span>${article.date}</span>
+          </div>
+          <div class="article-card-actions">
+            <button class="action-btn edit" onclick="editArticle(${article.id}, event)" title="수정">✏️</button>
+            <button class="action-btn delete" onclick="deleteArticle(${article.id}, event)" title="삭제">🗑️</button>
+          </div>
         </div>
-      ` : ''}
-    `;
-    container.appendChild(card);
-  });
+      </div>
+    </div>
+  `).join('');
 }
 
-// 게시글 작성 및 수정 저장
-async function saveArticle(e) {
-  e.preventDefault();
-  const token = localStorage.getItem('token');
-  if (!token) return alert('로그인이 필요합니다.');
-
-  const idElement = document.getElementById('articleId');
-  const id = idElement ? idElement.value : '';
-  const category = document.getElementById('artCategory').value;
-  const title = document.getElementById('artTitle').value;
-  const author = document.getElementById('artAuthor').value;
-  const content = document.getElementById('artContent').value;
-
-  const payload = { category, title, author, content };
-  const method = id ? 'PUT' : 'POST';
-  const url = id ? `${API_BASE_URL}/api/articles/${id}` : `${API_BASE_URL}/api/articles`;
-
-  try {
-    const res = await fetch(url, {
-      method,
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${token}`
-      },
-      body: JSON.stringify(payload)
+/* ===== Event Listeners Setup ===== */
+function setupEventListeners() {
+  // 검색 입력
+  const searchInput = document.getElementById('searchInput');
+  if (searchInput) {
+    searchInput.addEventListener('input', (e) => {
+      searchQuery = e.target.value;
+      renderArticles();
     });
-
-    const data = await res.json();
-    if (res.ok) {
-      alert(data.message || '성공적으로 저장되었습니다.');
-      closeWriteModal();
-      fetchArticles();
-    } else {
-      alert(data.message || '저장에 실패했습니다.');
-    }
-  } catch (err) {
-    alert('서버 통신 오류가 발생했습니다.');
   }
-}
 
-// 게시글 삭제
-async function deleteArticle(id) {
-  if (!confirm('정말 삭제하시겠습니까?')) return;
-  const token = localStorage.getItem('token');
+  // 로그인 폼
+  const loginForm = document.getElementById('loginForm');
+  if (loginForm) {
+    loginForm.addEventListener('submit', (e) => {
+      e.preventDefault();
+      const username = document.getElementById('loginUsername').value;
+      if (!username) return;
 
-  try {
-    const res = await fetch(`${API_BASE_URL}/api/articles/${id}`, {
-      method: 'DELETE',
-      headers: { 'Authorization': `Bearer ${token}` }
+      currentUser = { name: username };
+      localStorage.setItem('currentUser', JSON.stringify(currentUser));
+      renderHeaderUserUI();
+      closeLoginModal();
+      showToast(`${username}님 환영합니다!`, 'success');
     });
-
-    const data = await res.json();
-    if (res.ok) {
-      alert('삭제되었습니다.');
-      fetchArticles();
-    } else {
-      alert(data.message || '삭제 실패');
-    }
-  } catch (err) {
-    alert('서버 통신 오류가 발생했습니다.');
   }
-}
 
-// 게시글 수정 폼 채우기
-function editArticle(id) {
-  const article = articles.find(a => a.id === id);
-  if (!article) return;
-
-  let idElement = document.getElementById('articleId');
-  if (!idElement) {
-    idElement = document.createElement('input');
-    idElement.type = 'hidden';
-    idElement.id = 'articleId';
-    document.getElementById('articleForm').appendChild(idElement);
-  }
-  
-  idElement.value = article.id;
-  document.getElementById('artCategory').value = article.category;
-  document.getElementById('artTitle').value = article.title;
-  if (document.getElementById('artAuthor')) {
-    document.getElementById('artAuthor').value = article.author || '';
-  }
-  document.getElementById('artContent').value = article.content;
-
-  openWriteModal();
-}
-
-// --- 모달 제어 함수 ---
-function openLoginModal() {
-  openModal('loginModal');
-}
-
-function closeLoginModal() {
-  closeModal('loginModal');
-  const loginError = document.getElementById('loginError');
-  if (loginError) loginError.style.display = 'none';
-}
-
-function openWriteModal() {
-  openModal('writeModal');
-}
-
-function closeWriteModal() {
-  closeModal('writeModal');
+  // 기사 작성/수정 폼
   const articleForm = document.getElementById('articleForm');
-  if (articleForm) articleForm.reset();
-  const idElement = document.getElementById('articleId');
-  if (idElement) idElement.value = '';
-}
+  if (articleForm) {
+    articleForm.addEventListener('submit', (e) => {
+      e.preventDefault();
 
-function openModal(modalId) {
-  const modal = document.getElementById(modalId);
-  if (modal) {
-    modal.classList.add('active');
-    modal.style.display = 'flex';
+      const title = document.getElementById('inputTitle').value;
+      const category = document.getElementById('selectCategory').value;
+      const excerpt = document.getElementById('inputExcerpt').value;
+      const content = document.getElementById('textContent').value;
+      const image = document.getElementById('inputImageUrl').value;
+
+      if (editingArticleId) {
+        // 수정
+        articles = articles.map(a => {
+          if (a.id === editingArticleId) {
+            return { ...a, title, category, excerpt, content, image };
+          }
+          return a;
+        });
+        showToast('기사가 수정되었습니다.', 'success');
+      } else {
+        // 새로 작성
+        const newArticle = {
+          id: Date.now(),
+          title,
+          category,
+          excerpt,
+          content,
+          image,
+          author: currentUser ? currentUser.name : '익명',
+          date: new Date().toISOString().split('T')[0],
+          views: 0
+        };
+        articles.unshift(newArticle);
+        showToast('새 기사가 등록되었습니다.', 'success');
+      }
+
+      localStorage.setItem('articles', JSON.stringify(articles));
+      renderArticles();
+      closeWriteModal();
+    });
   }
 }
 
-function closeModal(modalId) {
-  const modal = document.getElementById(modalId);
-  if (modal) {
-    modal.classList.remove('active');
-    modal.style.display = 'none';
-  }
-}
+// 로그아웃
+window.logout = function () {
+  currentUser = null;
+  localStorage.removeItem('currentUser');
+  renderHeaderUserUI();
+  showToast('로그아웃 되었습니다.', 'info');
+};
 
-// XSS 방지용 HTML 문자열 이스케이프
-function escapeHtml(str) {
-  if (!str) return '';
-  return String(str)
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#039;");
+// 토스트 메시지
+function showToast(message, type = 'info') {
+  let container = document.querySelector('.toast-container');
+  if (!container) {
+    container = document.createElement('div');
+    container.className = 'toast-container';
+    document.body.appendChild(container);
+  }
+
+  const toast = document.createElement('div');
+  toast.className = `toast ${type}`;
+  toast.innerHTML = `<span>${message}</span>`;
+  container.appendChild(toast);
+
+  setTimeout(() => toast.classList.add('show'), 10);
+  setTimeout(() => {
+    toast.classList.remove('show');
+    setTimeout(() => toast.remove(), 400);
+  }, 3000);
 }
