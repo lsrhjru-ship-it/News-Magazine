@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="ko">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>뉴스매거진 - 최신 뉴스와 이슈를 한눈에</title>
+  <meta name="description" content="날씨, 게임, SNS, 스포츠 등 다양한 분야의 뉴스를 확인하세요. 누구나 기사를 작성하고 공유할 수 있는 뉴스 플랫폼입니다.">
+  <meta name="keywords" content="뉴스, 기사, 최신뉴스, 뉴스매거진, 날씨, 게임, SNS, 스포츠">
+  <link rel="stylesheet" href="style.css">
+  <link rel="icon"
+    href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📰</text></svg>">
+</head>
+
+<body>
+
+  <!-- ===== HEADER ===== -->
+  <header class="header">
+    <div class="header-top">
+      <div class="logo">
+        <div class="logo-icon">N</div>
+        <div>
+          <div class="logo-text">뉴스매거진</div>
+          <div class="logo-sub">News Magazine</div>
+        </div>
+      </div>
+
+      <div class="header-actions">
+        <div class="search-container">
+          <span class="search-icon">🔍</span>
+          <input type="text" id="searchInput" class="search-input" placeholder="기사 검색..." aria-label="기사 검색">
+        </div>
+        <button id="themeBtn" class="btn-icon" onclick="toggleTheme()" title="테마 변경" aria-label="테마 변경">☀️</button>
+
+        <!-- 로그인 전: 로그인 버튼 -->
+        <button id="loginBtn" class="btn btn-ghost" onclick="openLoginModal()" aria-label="로그인">
+          🔐 <span class="btn-text">로그인</span>
+        </button>
+
+        <!-- 로그인 후: 사용자 영역 -->
+        <div id="userArea" style="display:none;align-items:center;gap:10px">
+          <div class="user-badge">
+            <span class="user-avatar">👤</span>
+            <span id="userNameDisplay" class="user-name"></span>
+          </div>
+          <button class="btn btn-ghost" onclick="logout()" style="font-size:12px;padding:7px 12px">
+            로그아웃
+          </button>
+        </div>
+
+        <!-- 기사 작성 (로그인 시만 표시) -->
+        <button class="btn btn-gold" onclick="openWriteModal()" id="writeBtn" style="display:none" aria-label="기사 작성">
+          <span>✍️</span>
+          <span class="btn-text">기사 작성</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- Category Navigation -->
+    <nav class="category-nav" aria-label="카테고리 탐색">
+      <div class="category-nav-inner" id="categoryNav">
+        <!-- Rendered by JS -->
+      </div>
+    </nav>
+  </header>
+
+  <!-- Stats Bar -->
+  <div class="stats-bar" id="statsBar" role="status" aria-live="polite">
+    <!-- Rendered by JS -->
+  </div>
+
+  <!-- ===== MAIN ===== -->
+  <main class="main">
+
+    <!-- Search Status -->
+    <div id="searchStatus" style="display:none;margin-bottom:16px;font-size:14px;color:var(--text-muted);"></div>
+
+    <!-- Hero Section -->
+    <section id="heroSection" class="hero-section" aria-label="주요 기사">
+      <!-- Rendered by JS -->
+    </section>
+
+    <!-- Articles Grid -->
+    <section aria-label="기사 목록">
+      <div class="section-header">
+        <h2 class="section-title">전체 기사</h2>
+        <button class="btn btn-ghost" onclick="openWriteModal()" style="font-size:13px;padding:7px 14px">
+          + 새 기사
+        </button>
+      </div>
+      <div class="articles-grid" id="articlesGrid">
+        <!-- Rendered by JS -->
+      </div>
+    </section>
+
+  </main>
+
+  <!-- ===== FOOTER ===== -->
+  <footer class="footer">
+    <div class="footer-logo">뉴스매거진</div>
+    <p class="footer-text">누구나 기사를 쓰고, 세상과 이야기를 나누는 공간 · © 2026 뉴스매거진</p>
+  </footer>
+
+  <!-- ===== Toast Container ===== -->
+  <div class="toast-container" id="toastContainer" aria-live="assertive" aria-atomic="true"></div>
+
+  <!-- ===== WRITE MODAL ===== -->
+  <div class="modal-overlay" id="writeModal" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+    <div class="modal">
+      <div class="modal-header">
+        <h2 class="modal-title" id="modalTitle">✍️ 새 기사 작성</h2>
+        <button class="modal-close" onclick="closeWriteModal()" aria-label="닫기">✕</button>
+      </div>
+      <div class="modal-body">
+        <form id="articleForm" novalidate>
+
+          <div class="form-group">
+            <label class="form-label" for="artTitle">제목 <span>*</span></label>
+            <input type="text" id="artTitle" class="form-input" placeholder="기사 제목을 입력하세요" maxlength="120" required>
+          </div>
+
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+            <div class="form-group">
+              <label class="form-label" for="artCategory">카테고리 <span>*</span></label>
+              <select id="artCategory" class="form-select" required>
+                <option value="날씨" selected>🌤️ 날씨</option>
+                <option value="게임">🎮 게임</option>
+                <option value="SNS">📱 SNS</option>
+                <option value="스포츠">⚽ 스포츠</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="artAuthor">작성자 <span>*</span></label>
+              <input type="text" id="artAuthor" class="form-input" placeholder="이름 또는 필명" maxlength="30" required>
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label" for="artContent">기사 내용 <span>*</span></label>
+            <textarea id="artContent" class="form-textarea" placeholder="기사 내용을 자세히 작성해 주세요..." required></textarea>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">대표 이미지 <span style="color:var(--text-muted);font-weight:400">(선택, 최대
+                5MB)</span></label>
+
+            <!-- Upload Area -->
+            <div class="image-upload-area" id="uploadArea">
+              <input type="file" id="imageInput" accept="image/*" aria-label="이미지 파일 선택">
+              <div class="upload-icon">🖼️</div>
+              <div class="upload-text">이미지를 드래그하거나 클릭하여 업로드</div>
+              <div class="upload-subtext">JPG, PNG, GIF, WEBP 지원</div>
+            </div>
+
+            <!-- Preview -->
+            <div id="imagePreviewContainer" style="display:none">
+              <div class="image-preview-container">
+                <img id="imagePreview" class="image-preview" alt="미리보기">
+                <button type="button" class="image-preview-remove" onclick="clearImagePreview()"
+                  aria-label="이미지 제거">✕</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="form-footer">
+            <button type="button" class="btn btn-ghost" onclick="closeWriteModal()">취소</button>
+            <button type="submit" class="btn btn-primary">💾 저장하기</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== DETAIL MODAL ===== -->
+  <div class="modal-overlay" id="detailModal" role="dialog" aria-modal="true" aria-label="기사 상세보기">
+    <div class="modal detail-modal">
+      <div class="modal-header" style="position:sticky;top:0;z-index:10">
+        <span style="font-size:14px;color:var(--text-muted)">📄 기사 상세보기</span>
+        <button class="modal-close" onclick="closeModal('detailModal')" aria-label="닫기">✕</button>
+      </div>
+      <div id="detailContent">
+        <!-- Rendered by JS -->
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== LOGIN MODAL ===== -->
+  <div class="modal-overlay" id="loginModal" role="dialog" aria-modal="true" aria-labelledby="loginModalTitle">
+    <div class="modal" style="max-width:420px">
+      <div class="modal-header">
+        <h2 class="modal-title" id="loginModalTitle">🔐 관리자 로그인</h2>
+        <button class="modal-close" onclick="closeLoginModal()" aria-label="닫기">✕</button>
+      </div>
+      <div class="modal-body">
+        <p style="font-size:14px;color:var(--text-muted);margin-bottom:24px;line-height:1.7">
+          기사 작성/수정/삭제는 허가된 사용자만 가능합니다.<br>허가된 아이디로 로그인하세요.
+        </p>
+        <form id="loginForm" novalidate>
+          <div class="form-group">
+            <label class="form-label" for="loginId">아이디</label>
+            <input type="text" id="loginId" class="form-input" placeholder="아이디 입력" autocomplete="username" required>
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="loginPw">비밀번호</label>
+            <input type="password" id="loginPw" class="form-input" placeholder="비밀번호 입력" autocomplete="current-password"
+              required>
+          </div>
+          <div id="loginError"
+            style="display:none;color:var(--accent-red);font-size:13px;margin-bottom:16px;padding:10px 14px;background:rgba(232,85,85,0.1);border-radius:8px;border:1px solid rgba(232,85,85,0.2)">
+          </div>
+          <div class="form-footer" style="padding-top:0;border-top:none;margin-top:0">
+            <button type="button" class="btn btn-ghost" onclick="closeLoginModal()">취소</button>
+            <button type="submit" class="btn btn-primary">🔓 로그인</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+
+</html>
