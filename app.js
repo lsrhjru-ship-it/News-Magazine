@@ -27,10 +27,10 @@ document.addEventListener('DOMContentLoaded', () => {
   renderHeaderUserUI();
   setupEventListeners();
 
-  // 1. 기사 목록을 0초만에 화면에 즉시 렌더링
+  // 1. 기사 목록을 화면에 즉시 렌더링
   renderArticles();
 
-  // 2. 날씨 API 및 GPS 수신은 백그라운드에서 비동기로 수행 (화면 로딩 차단 해제)
+  // 2. 날씨 API 및 GPS 수신은 백그라운드에서 비동기로 수행
   fetchWeatherAndAutoCreateNews();
 });
 
@@ -72,7 +72,6 @@ async function fetchWeatherAndAutoCreateNews() {
   if (navigator.geolocation) {
     try {
       const position = await new Promise((resolve, reject) => {
-        // GPS 대기 시간을 1.5초로 줄여 비동기 응답 속도 최적화
         navigator.geolocation.getCurrentPosition(resolve, reject, { timeout: 1500 });
       });
       lat = position.coords.latitude;
@@ -123,8 +122,6 @@ async function fetchWeatherAndAutoCreateNews() {
 
         articles.unshift(weatherArticle);
         localStorage.setItem('articles', JSON.stringify(articles));
-        
-        // 날씨 기사가 자동 생성되었을 때만 화면 갱신
         renderArticles();
       }
     }
@@ -241,7 +238,7 @@ window.closeWriteModal = function () {
   clearImagePreview();
 };
 
-// 상세보기 모달
+/* ===== 기사 상세보기 모달 ===== */
 window.openDetailModal = function (articleId) {
   const article = articles.find(a => a.id === Number(articleId));
   if (!article) return;
@@ -268,7 +265,13 @@ window.openDetailModal = function (articleId) {
         <span>•</span>
         <span>조회수 ${article.views}</span>
       </div>
-      <div style="font-size: 1rem; color: var(--text-secondary); line-height: 1.8; white-space: pre-line;">${article.content}</div>
+      <div style="font-size: 1rem; color: var(--text-secondary); line-height: 1.8; white-space: pre-line; margin-bottom: 24px;">${article.content}</div>
+
+      <!-- 상세보기 하단 수정 & 삭제 버튼 -->
+      <div style="display: flex; justify-content: flex-end; gap: 10px; border-top: 1px solid var(--border-color); padding-top: 16px;">
+        <button class="btn btn-ghost" onclick="editArticle(${article.id}, event)" style="font-size: 0.85rem; padding: 8px 14px;">✏️ 기사 수정</button>
+        <button class="btn" onclick="deleteArticle(${article.id}, event)" style="background: rgba(232,85,85,0.15); color: #f87171; border: 1px solid rgba(232,85,85,0.3); font-size: 0.85rem; padding: 8px 14px;">🗑️ 기사 삭제</button>
+      </div>
     `;
   }
 
@@ -325,8 +328,6 @@ function renderArticles() {
     );
   }
 
-  const isAdmin = currentUser && currentUser.role === 'admin';
-
   if (filtered.length === 0) {
     grid.innerHTML = `
       <div class="empty-state" style="text-align:center; padding: 40px; width: 100%;">
@@ -356,12 +357,10 @@ function renderArticles() {
             <div>
               <span>${article.author}</span> • <span>${article.date}</span>
             </div>
-            ${isAdmin ? `
-              <div style="display:flex; gap:4px;">
-                <button class="action-btn edit" onclick="editArticle(${article.id}, event)" title="수정">✏️</button>
-                <button class="action-btn delete" onclick="deleteArticle(${article.id}, event)" title="삭제">🗑️</button>
-              </div>
-            ` : ''}
+            <div style="display:flex; gap:6px;">
+              <button class="action-btn edit" onclick="editArticle(${article.id}, event)" title="수정" style="padding: 3px 7px; border-radius: 4px; border: 1px solid var(--border-color); background: var(--bg-card); cursor: pointer;">✏️</button>
+              <button class="action-btn delete" onclick="deleteArticle(${article.id}, event)" title="삭제" style="padding: 3px 7px; border-radius: 4px; border: 1px solid var(--border-color); background: var(--bg-card); cursor: pointer;">🗑️</button>
+            </div>
           </div>
         </div>
       </div>
@@ -369,24 +368,61 @@ function renderArticles() {
   }).join('');
 }
 
+/* ===== 기사 삭제 처리 ===== */
 window.deleteArticle = function (id, event) {
-  if (event) event.stopPropagation();
+  if (event) event.stopPropagation(); // 카드 클릭 모달 오픈 방지
 
-  if (!currentUser || currentUser.role !== 'admin') {
-    showToast('삭제 권한이 없습니다.', 'error');
+  if (!currentUser) {
+    showToast('기사 삭제는 로그인 후 가능합니다.', 'error');
+    openLoginModal();
     return;
   }
 
-  if (!confirm('정말 삭제하시겠습니까?')) return;
+  const article = articles.find(a => a.id === Number(id));
+  if (!article) return;
+
+  // 작성자 본인이거나 관리자(admin)인지 확인
+  const isAuthor = article.author === currentUser.name;
+  const isAdmin = currentUser.role === 'admin';
+
+  if (!isAuthor && !isAdmin) {
+    showToast('본인이 작성한 기사만 삭제할 수 있습니다.', 'error');
+    return;
+  }
+
+  if (!confirm('정말 이 기사를 삭제하시겠습니까?')) return;
 
   articles = articles.filter(a => a.id !== Number(id));
   localStorage.setItem('articles', JSON.stringify(articles));
+
+  closeDetailModal(); // 상세보기 창이 열려있다면 닫기
   renderArticles();
   showToast('기사가 삭제되었습니다.', 'info');
 };
 
+/* ===== 기사 수정 처리 ===== */
 window.editArticle = function (id, event) {
-  if (event) event.stopPropagation();
+  if (event) event.stopPropagation(); // 카드 클릭 모달 오픈 방지
+
+  if (!currentUser) {
+    showToast('기사 수정은 로그인 후 가능합니다.', 'error');
+    openLoginModal();
+    return;
+  }
+
+  const article = articles.find(a => a.id === Number(id));
+  if (!article) return;
+
+  // 작성자 본인이거나 관리자(admin)인지 확인
+  const isAuthor = article.author === currentUser.name;
+  const isAdmin = currentUser.role === 'admin';
+
+  if (!isAuthor && !isAdmin) {
+    showToast('본인이 작성한 기사만 수정할 수 있습니다.', 'error');
+    return;
+  }
+
+  closeDetailModal(); // 상세보기 창이 열려있다면 닫기
   window.openWriteModal(id);
 };
 
