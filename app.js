@@ -4,7 +4,7 @@
 // 예: 로컬 서버 사용 시 -> 'http://localhost:3000'
 // 예: 외부/클라우드 서버 사용 시 -> 'https://your-domain.com'
 // 예: Express에서 HTML/JS를 같이 호스팅하는 경우 -> '' (빈 문자열)
-const API_BASE_URL = 'http://dc.wrd.kr:26894';
+const API_BASE_URL = 'https://se-eaib.onrender.com';
 
 let articles = [];
 
