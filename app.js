@@ -1,7 +1,9 @@
 // ==========================================
-// ⚙️ 서버 주소 설정 (원하시는 주소로 직접 수정하세요)
+// ⚙️ 서버 주소 설정 (Render 배포 및 로컬 자동 감지)
 // ==========================================
-const SERVER_URL = 'https://news-magazine-1.onrender.com'; // <- 원하시는 서버 URL 입력
+const SERVER_URL = window.location.origin.includes('onrender.com') 
+  ? window.location.origin 
+  : 'http://localhost:3000'; // <- 로컬 테스트 시 해당 주소 사용
 const API_BASE = `${SERVER_URL}/api`;
 
 /* ===== App State ===== */
@@ -33,7 +35,7 @@ document.addEventListener('DOMContentLoaded', () => {
   renderHeaderUserUI();
   setupEventListeners();
 
-  // 1. 기상청/날씨 데이터 자동 불러오기 & 스탯바 렌더링
+  // 1. 기상청/날씨 데이터 자동 불러오기
   fetchKMAWeather();
 
   // 2. 서버에서 기사 목록 가져오기
@@ -102,15 +104,27 @@ window.toggleTheme = function () {
   }
 };
 
+/* ===== 서버 응답 파싱 유틸리티 (JSON Parsing 안전 처리) ===== */
+async function parseResponse(res) {
+  const text = await res.text();
+  try {
+    return JSON.parse(text);
+  } catch (e) {
+    return { message: text || `서버 오류가 발생했습니다. (상태 코드: ${res.status})` };
+  }
+}
+
 /* ===== 서버 API 연동 (기사 목록 가져오기) ===== */
 async function fetchArticles() {
   try {
     const res = await fetch(`${API_BASE}/articles`);
     if (!res.ok) throw new Error('목록 조회 실패');
-    articles = await res.json();
+    articles = await parseResponse(res);
 
-    renderHeroSection();
-    renderArticles();
+    if (Array.isArray(articles)) {
+      renderHeroSection();
+      renderArticles();
+    }
   } catch (err) {
     console.error('기사 목록 불러오기 오류:', err);
   }
@@ -119,7 +133,7 @@ async function fetchArticles() {
 /* ===== 히어로 섹션 (주요/최신 기사 자동 렌더링) ===== */
 function renderHeroSection() {
   const heroSection = document.getElementById('heroSection');
-  if (!heroSection || articles.length === 0) return;
+  if (!heroSection || !Array.isArray(articles) || articles.length === 0) return;
 
   const mainArticle = articles[0];
   const icon = getCategoryIcon(mainArticle.category);
@@ -169,6 +183,7 @@ window.openWriteModal = function (articleId = null) {
   const form = document.getElementById('articleForm');
 
   editingArticleId = articleId;
+  window.clearImagePreview();
 
   if (articleId) {
     const article = articles.find(a => a.id === Number(articleId));
@@ -213,6 +228,7 @@ window.openDetailModal = function (articleId) {
         <div style="margin-bottom: 12px;">
           <span style="background: rgba(255,255,255,0.08); border:1px solid var(--border-color); color: var(--accent-gold); padding: 4px 10px; border-radius: 20px; font-size: 0.85rem;">${icon} ${article.category}</span>
         </div>
+        ${article.imageUrl ? `<img src="${article.imageUrl}" style="width:100%; max-height:300px; object-fit:cover; border-radius:12px; margin-bottom:16px;" />` : ''}
         <h2 style="font-size: 1.5rem; margin-bottom: 12px; line-height: 1.4; font-weight: 700;">${article.title}</h2>
         <div style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 20px; display: flex; gap: 8px; align-items: center; border-bottom: 1px solid var(--border-color); padding-bottom: 12px;">
           <span>작성자: <strong style="color: var(--text-primary);">${article.author}</strong></span>
@@ -265,7 +281,7 @@ function renderArticles() {
   const grid = document.getElementById('articlesGrid');
   if (!grid) return;
 
-  let filtered = articles;
+  let filtered = Array.isArray(articles) ? articles : [];
 
   if (currentCategory !== '전체') {
     filtered = filtered.filter(a => a.category === currentCategory);
@@ -292,7 +308,8 @@ function renderArticles() {
   grid.innerHTML = filtered.map(article => {
     const icon = getCategoryIcon(article.category);
     return `
-      <div class="article-card" onclick="openDetailModal(${article.id})" style="cursor:pointer; border: 1px solid var(--border-color); border-radius: 12px; padding: 16px; background: var(--bg-card, #1e293b); margin-bottom: 16px;">
+      <div class="article-card" onclick="openDetailModal(${article.id})" style="cursor:pointer; border: 1px solid var(--border-color); border-radius: 12px; padding: 16px; background: var(--bg-card, #1e293b); margin-bottom: 16px; overflow:hidden;">
+        ${article.imageUrl ? `<img src="${article.imageUrl}" style="width:100%; height:160px; object-fit:cover; border-radius:8px; margin-bottom:12px;" />` : ''}
         <div class="article-card-body">
           <span style="font-size: 0.8rem; color: var(--accent-gold, #fbbf24);">${icon} ${article.category}</span>
           <h3 style="margin: 8px 0; font-size: 1.1rem; color: var(--text-primary, #fff);">${article.title}</h3>
@@ -324,7 +341,7 @@ window.deleteArticle = async function (id, event) {
       headers: { 'Authorization': `Bearer ${token}` }
     });
 
-    const data = await res.json();
+    const data = await parseResponse(res);
     if (!res.ok) throw new Error(data.message);
 
     showToast(data.message || '게시글이 삭제되었습니다.', 'info');
@@ -361,6 +378,16 @@ function renderHeaderUserUI() {
     if (userArea) userArea.style.display = 'none';
     if (writeBtn) writeBtn.style.display = 'none';
   }
+}
+
+/* ===== 파일 읽기 헬퍼 함수 (Base64 변환) ===== */
+function readFileAsBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = error => reject(error);
+    reader.readAsDataURL(file);
+  });
 }
 
 /* ===== 이벤트 리스너 바인딩 ===== */
@@ -409,7 +436,7 @@ function setupEventListeners() {
           body: JSON.stringify({ username, password })
         });
 
-        const data = await res.json();
+        const data = await parseResponse(res);
         if (!res.ok) throw new Error(data.message);
 
         token = data.token;
@@ -432,7 +459,7 @@ function setupEventListeners() {
     });
   }
 
-  // 기사 작성/수정 폼 제출 처리
+  // 기사 작성/수정 폼 제출 처리 (이미지 업로드 대응)
   const articleForm = document.getElementById('articleForm');
   if (articleForm) {
     articleForm.addEventListener('submit', async (e) => {
@@ -448,6 +475,17 @@ function setupEventListeners() {
       const content = document.getElementById('artContent').value;
       const summary = content.substring(0, 100);
 
+      // 이미지 파일 읽기
+      const imageInput = document.getElementById('imageInput');
+      let imageUrl = null;
+      if (imageInput && imageInput.files && imageInput.files[0]) {
+        try {
+          imageUrl = await readFileAsBase64(imageInput.files[0]);
+        } catch (imgErr) {
+          showToast('이미지 읽기에 실패했습니다.', 'error');
+        }
+      }
+
       const method = editingArticleId ? 'PUT' : 'POST';
       const url = editingArticleId ? `${API_BASE}/articles/${editingArticleId}` : `${API_BASE}/articles`;
 
@@ -458,10 +496,10 @@ function setupEventListeners() {
             'Content-Type': 'application/json',
             'Authorization': `Bearer ${token}`
           },
-          body: JSON.stringify({ category, title, content, summary })
+          body: JSON.stringify({ category, title, content, summary, imageUrl })
         });
 
-        const data = await res.json();
+        const data = await parseResponse(res);
         if (!res.ok) throw new Error(data.message);
 
         showToast(editingArticleId ? '기사가 수정되었습니다.' : '새 기사가 등록되었습니다.', 'success');
@@ -501,17 +539,15 @@ function showToast(message, type = 'info') {
   let container = document.getElementById('toastContainer');
   if (!container) return;
 
-  // 컨테이너를 화면 왼쪽 하단 고정으로 설정
   container.style.cssText = "position: fixed; bottom: 20px; left: 20px; z-index: 9999; display: flex; flex-direction: column; gap: 6px; pointer-events: none;";
 
   const toast = document.createElement('div');
-  // 작고 깔끔한 컴팩트 알림창 스타일
-  toast.style.cssText = "padding: 8px 14px; background: rgba(15, 23, 42, 0.95); color: #f1f5f9; border-radius: 8px; font-size: 0.78rem; border: 1px solid rgba(255,255,255,0.15); max-width: 250px; box-shadow: 0 4px 12px rgba(0,0,0,0.3); backdrop-filter: blur(6px); pointer-events: auto; word-break: break-all;";
-  
+  toast.style.cssText = "padding: 8px 14px; background: rgba(15, 23, 42, 0.95); color: #f1f5f9; border-radius: 8px; font-size: 0.78rem; border: 1px solid rgba(255,255,255,0.15); max-width: 280px; box-shadow: 0 4px 12px rgba(0,0,0,0.3); backdrop-filter: blur(6px); pointer-events: auto; word-break: break-all;";
+
   toast.innerHTML = `<span>${message}</span>`;
   container.appendChild(toast);
 
   setTimeout(() => {
     toast.remove();
-  }, 2500);
+  }, 3000);
 }
