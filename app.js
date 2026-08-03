@@ -195,6 +195,12 @@ window.openWriteModal = function (articleId = null) {
     return;
   }
 
+  // 수정 시에는 추가로 관리자 권한 체크
+  if (articleId && currentUser.role !== 'admin') {
+    showToast('기사 수정은 관리자만 가능합니다.', 'error');
+    return;
+  }
+
   const modal = document.getElementById('writeModal');
   const title = document.getElementById('modalTitle');
   const form = document.getElementById('articleForm');
@@ -205,7 +211,7 @@ window.openWriteModal = function (articleId = null) {
   if (articleId) {
     const article = articles.find(a => a.id === Number(articleId));
     if (article) {
-      if (title) title.textContent = '✏️ 기사 수정';
+      if (title) title.textContent = '✏️ 기사 수정 (관리자)';
       if (document.getElementById('artTitle')) document.getElementById('artTitle').value = article.title;
       if (document.getElementById('artCategory')) document.getElementById('artCategory').value = article.category;
       if (document.getElementById('artAuthor')) document.getElementById('artAuthor').value = article.author;
@@ -250,6 +256,7 @@ window.openDetailModal = function (articleId) {
   const modal = document.getElementById('detailModal');
   const detailContent = document.getElementById('detailContent');
   const icon = getCategoryIcon(article.category);
+  const isAdmin = currentUser && currentUser.role === 'admin';
 
   if (detailContent) {
     detailContent.innerHTML = `
@@ -267,11 +274,13 @@ window.openDetailModal = function (articleId) {
       </div>
       <div style="font-size: 1rem; color: var(--text-secondary); line-height: 1.8; white-space: pre-line; margin-bottom: 24px;">${article.content}</div>
 
-      <!-- 상세보기 하단 수정 & 삭제 버튼 -->
-      <div style="display: flex; justify-content: flex-end; gap: 10px; border-top: 1px solid var(--border-color); padding-top: 16px;">
-        <button class="btn btn-ghost" onclick="editArticle(${article.id}, event)" style="font-size: 0.85rem; padding: 8px 14px;">✏️ 기사 수정</button>
-        <button class="btn" onclick="deleteArticle(${article.id}, event)" style="background: rgba(232,85,85,0.15); color: #f87171; border: 1px solid rgba(232,85,85,0.3); font-size: 0.85rem; padding: 8px 14px;">🗑️ 기사 삭제</button>
-      </div>
+      <!-- 관리자전용 수정/삭제 버튼 (관리자 로그인 시에만 노출) -->
+      ${isAdmin ? `
+        <div style="display: flex; justify-content: flex-end; gap: 10px; border-top: 1px solid var(--border-color); padding-top: 16px;">
+          <button class="btn btn-ghost" onclick="editArticle(${article.id}, event)" style="font-size: 0.85rem; padding: 8px 14px;">✏️ 기사 수정</button>
+          <button class="btn" onclick="deleteArticle(${article.id}, event)" style="background: rgba(232,85,85,0.15); color: #f87171; border: 1px solid rgba(232,85,85,0.3); font-size: 0.85rem; padding: 8px 14px;">🗑️ 기사 삭제</button>
+        </div>
+      ` : ''}
     `;
   }
 
@@ -328,6 +337,8 @@ function renderArticles() {
     );
   }
 
+  const isAdmin = currentUser && currentUser.role === 'admin';
+
   if (filtered.length === 0) {
     grid.innerHTML = `
       <div class="empty-state" style="text-align:center; padding: 40px; width: 100%;">
@@ -357,10 +368,14 @@ function renderArticles() {
             <div>
               <span>${article.author}</span> • <span>${article.date}</span>
             </div>
-            <div style="display:flex; gap:6px;">
-              <button class="action-btn edit" onclick="editArticle(${article.id}, event)" title="수정" style="padding: 3px 7px; border-radius: 4px; border: 1px solid var(--border-color); background: var(--bg-card); cursor: pointer;">✏️</button>
-              <button class="action-btn delete" onclick="deleteArticle(${article.id}, event)" title="삭제" style="padding: 3px 7px; border-radius: 4px; border: 1px solid var(--border-color); background: var(--bg-card); cursor: pointer;">🗑️</button>
-            </div>
+
+            <!-- 관리자 전용 수정/삭제 버튼 -->
+            ${isAdmin ? `
+              <div style="display:flex; gap:6px;">
+                <button class="action-btn edit" onclick="editArticle(${article.id}, event)" title="수정" style="padding: 3px 7px; border-radius: 4px; border: 1px solid var(--border-color); background: var(--bg-card); cursor: pointer;">✏️</button>
+                <button class="action-btn delete" onclick="deleteArticle(${article.id}, event)" title="삭제" style="padding: 3px 7px; border-radius: 4px; border: 1px solid var(--border-color); background: var(--bg-card); cursor: pointer;">🗑️</button>
+              </div>
+            ` : ''}
           </div>
         </div>
       </div>
@@ -368,61 +383,42 @@ function renderArticles() {
   }).join('');
 }
 
-/* ===== 기사 삭제 처리 ===== */
+/* ===== 기사 삭제 처리 (관리자 전용) ===== */
 window.deleteArticle = function (id, event) {
-  if (event) event.stopPropagation(); // 카드 클릭 모달 오픈 방지
+  if (event) event.stopPropagation();
 
-  if (!currentUser) {
-    showToast('기사 삭제는 로그인 후 가능합니다.', 'error');
-    openLoginModal();
+  // 오직 관리자만 삭제 가능
+  if (!currentUser || currentUser.role !== 'admin') {
+    showToast('기사 삭제 권한이 없습니다. (관리자 전용)', 'error');
+    if (!currentUser) openLoginModal();
     return;
   }
 
   const article = articles.find(a => a.id === Number(id));
   if (!article) return;
 
-  // 작성자 본인이거나 관리자(admin)인지 확인
-  const isAuthor = article.author === currentUser.name;
-  const isAdmin = currentUser.role === 'admin';
-
-  if (!isAuthor && !isAdmin) {
-    showToast('본인이 작성한 기사만 삭제할 수 있습니다.', 'error');
-    return;
-  }
-
-  if (!confirm('정말 이 기사를 삭제하시겠습니까?')) return;
+  if (!confirm('정말 이 기사를 삭제하시겠습니까? (관리자 권한)')) return;
 
   articles = articles.filter(a => a.id !== Number(id));
   localStorage.setItem('articles', JSON.stringify(articles));
 
-  closeDetailModal(); // 상세보기 창이 열려있다면 닫기
+  closeDetailModal();
   renderArticles();
   showToast('기사가 삭제되었습니다.', 'info');
 };
 
-/* ===== 기사 수정 처리 ===== */
+/* ===== 기사 수정 처리 (관리자 전용) ===== */
 window.editArticle = function (id, event) {
-  if (event) event.stopPropagation(); // 카드 클릭 모달 오픈 방지
+  if (event) event.stopPropagation();
 
-  if (!currentUser) {
-    showToast('기사 수정은 로그인 후 가능합니다.', 'error');
-    openLoginModal();
+  // 오직 관리자만 수정 가능
+  if (!currentUser || currentUser.role !== 'admin') {
+    showToast('기사 수정 권한이 없습니다. (관리자 전용)', 'error');
+    if (!currentUser) openLoginModal();
     return;
   }
 
-  const article = articles.find(a => a.id === Number(id));
-  if (!article) return;
-
-  // 작성자 본인이거나 관리자(admin)인지 확인
-  const isAuthor = article.author === currentUser.name;
-  const isAdmin = currentUser.role === 'admin';
-
-  if (!isAuthor && !isAdmin) {
-    showToast('본인이 작성한 기사만 수정할 수 있습니다.', 'error');
-    return;
-  }
-
-  closeDetailModal(); // 상세보기 창이 열려있다면 닫기
+  closeDetailModal();
   window.openWriteModal(id);
 };
 
@@ -517,6 +513,11 @@ function setupEventListeners() {
       const isPreviewVisible = document.getElementById('imagePreviewContainer')?.style.display !== 'none';
 
       if (editingArticleId) {
+        if (currentUser.role !== 'admin') {
+          showToast('기사 수정은 관리자만 가능합니다.', 'error');
+          return;
+        }
+
         articles = articles.map(a => {
           if (a.id === editingArticleId) {
             let updatedImage = a.image;
