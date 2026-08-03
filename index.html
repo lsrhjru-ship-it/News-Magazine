@@ -10,7 +10,6 @@
   <link rel="stylesheet" href="style.css">
   <link rel="icon"
     href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📰</text></svg>">
-  <meta http-equiv="Content-Security-Policy" content="upgrade-insecure-requests">
 </head>
 
 <body>
@@ -142,8 +141,7 @@
           </div>
 
           <div class="form-group">
-            <label class="form-label">대표 이미지 <span style="color:var(--text-muted);font-weight:400">(선택, 최대
-                5MB)</span></label>
+            <label class="form-label">대표 이미지 <span style="color:var(--text-muted);font-weight:400">(선택, 최대 5MB)</span></label>
 
             <!-- Upload Area -->
             <div class="image-upload-area" id="uploadArea">
@@ -218,7 +216,8 @@
     </div>
   </div>
 
-  <script src="app.js"></script>
+  <!-- 스크립트 연결 시 defer 추가 -->
+  <script src="app.js" defer></script>
 </body>
 
 </html>
