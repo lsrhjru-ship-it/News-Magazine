@@ -1,14 +1,9 @@
 /* ===== App State ===== */
-const API_BASE = '/api';
-let token = localStorage.getItem('token') || null;
+let articles = JSON.parse(localStorage.getItem('articles')) || [];
 let currentUser = JSON.parse(localStorage.getItem('currentUser')) || null;
-let articles = [];
 let currentCategory = '전체';
 let searchQuery = '';
 let editingArticleId = null;
-
-// 관리자 아이디 (서버의 기본 ADMIN_USERNAME)
-const ADMIN_USERNAME = 'lsrhjru';
 
 // 카테고리 데이터
 const categories = [
@@ -32,17 +27,12 @@ document.addEventListener('DOMContentLoaded', () => {
   renderHeaderUserUI();
   setupEventListeners();
 
-  // 서버에서 기사 목록 불러오기
-  fetchArticles();
+  // 1. 기사 목록을 화면에 즉시 렌더링
+  renderArticles();
 
-  // 실시간 날씨 데이터 수신
+  // 2. 날씨 API 및 GPS 수신은 백그라운드에서 비동기로 수행
   fetchWeatherAndAutoCreateNews();
 });
-
-/* ===== 관리자 여부 확인 함수 ===== */
-function checkIsAdmin() {
-  return currentUser && (currentUser.username === ADMIN_USERNAME || currentUser.name === '관리자');
-}
 
 /* ===== Theme Control (다크/라이트 모드) ===== */
 function initTheme() {
@@ -73,20 +63,7 @@ window.toggleTheme = function () {
   }
 };
 
-/* ===== 서버 API 연동 함수 (Fetch Articles) ===== */
-async function fetchArticles() {
-  try {
-    const res = await fetch(`${API_BASE}/articles`);
-    if (!res.ok) throw new Error('목록 조회 실패');
-    articles = await res.json();
-    renderArticles();
-  } catch (err) {
-    console.error('기사 목록 불러오기 오류:', err);
-    showToast('기사 목록을 불러오지 못했습니다.', 'error');
-  }
-}
-
-/* ===== Weather Integration ===== */
+/* ===== Weather & Location Integration ===== */
 async function fetchWeatherAndAutoCreateNews() {
   let lat = 37.5665;
   let lon = 126.9780;
@@ -123,8 +100,30 @@ async function fetchWeatherAndAutoCreateNews() {
       const weatherText = getWeatherStatusText(weather.weathercode);
       const temp = weather.temperature;
       const wind = weather.windspeed;
+      const todayStr = new Date().toISOString().split('T')[0];
 
       renderWeatherWidget(regionName, temp, weatherText, wind);
+
+      const hasTodayWeatherNews = articles.some(a => a.category === '기상청' && a.date === todayStr && a.isAuto);
+
+      if (!hasTodayWeatherNews) {
+        const weatherArticle = {
+          id: Date.now(),
+          title: `[기상청 속보] ${regionName} 현재 기온 ${temp}°C, '${weatherText}'`,
+          category: '기상청',
+          excerpt: `기상청 발표: ${regionName} 지역 현재 풍속 ${wind}km/h입니다.`,
+          content: `기상청에서 발표한 ${regionName} 지역 실시간 날씨 데이터입니다.\n\n- 현재 기온: ${temp}°C\n- 날씨 상태: ${weatherText}\n- 풍속: ${wind} km/h\n\n최신 기상 정보가 실시간 업데이트됩니다.`,
+          author: '기상청 자동시스템',
+          date: todayStr,
+          views: 1,
+          isAuto: true,
+          image: 'https://images.unsplash.com/photo-1592210454359-9043f067919b?w=800&q=80'
+        };
+
+        articles.unshift(weatherArticle);
+        localStorage.setItem('articles', JSON.stringify(articles));
+        renderArticles();
+      }
     }
   } catch (err) {
     console.error('날씨 데이터 불러오기 실패:', err);
@@ -168,6 +167,7 @@ function renderWeatherWidget(region, temp, text, wind) {
 }
 
 /* ===== Global Modal Control Functions ===== */
+
 window.closeModal = function (modalId) {
   const modal = document.getElementById(modalId);
   if (modal) {
@@ -189,13 +189,13 @@ window.closeLoginModal = function () {
 };
 
 window.openWriteModal = function (articleId = null) {
-  if (!currentUser || !token) {
+  if (!currentUser) {
     showToast('기사 작성/수정은 로그인 후 가능합니다.', 'error');
     openLoginModal();
     return;
   }
 
-  if (articleId && !checkIsAdmin()) {
+  if (articleId && currentUser.role !== 'admin') {
     showToast('기사 수정은 관리자만 가능합니다.', 'error');
     return;
   }
@@ -205,6 +205,7 @@ window.openWriteModal = function (articleId = null) {
   const form = document.getElementById('articleForm');
 
   editingArticleId = articleId;
+  clearImagePreview();
 
   if (articleId) {
     const article = articles.find(a => a.id === Number(articleId));
@@ -214,6 +215,16 @@ window.openWriteModal = function (articleId = null) {
       if (document.getElementById('artCategory')) document.getElementById('artCategory').value = article.category;
       if (document.getElementById('artAuthor')) document.getElementById('artAuthor').value = article.author;
       if (document.getElementById('artContent')) document.getElementById('artContent').value = article.content;
+
+      if (article.image) {
+        const previewImg = document.getElementById('imagePreview');
+        const uploadArea = document.getElementById('uploadArea');
+        const previewContainer = document.getElementById('imagePreviewContainer');
+
+        if (previewImg) previewImg.src = article.image;
+        if (uploadArea) uploadArea.style.display = 'none';
+        if (previewContainer) previewContainer.style.display = 'block';
+      }
     }
   } else {
     if (title) title.textContent = '✍️ 새 기사 작성';
@@ -229,6 +240,7 @@ window.openWriteModal = function (articleId = null) {
 window.closeWriteModal = function () {
   window.closeModal('writeModal');
   editingArticleId = null;
+  clearImagePreview();
 };
 
 /* ===== 기사 상세보기 모달 ===== */
@@ -236,13 +248,18 @@ window.openDetailModal = function (articleId) {
   const article = articles.find(a => a.id === Number(articleId));
   if (!article) return;
 
+  article.views = (article.views || 0) + 1;
+  localStorage.setItem('articles', JSON.stringify(articles));
+  renderArticles();
+
   const modal = document.getElementById('detailModal');
   const detailContent = document.getElementById('detailContent');
   const icon = getCategoryIcon(article.category);
-  const isAdmin = checkIsAdmin();
+  const isAdmin = currentUser && currentUser.role === 'admin';
 
   if (detailContent) {
     detailContent.innerHTML = `
+      ${article.image ? `<img src="${article.image}" style="width: 100%; max-height: 320px; object-fit: cover; border-radius: 12px; margin-bottom: 20px;" alt="${article.title}" loading="lazy">` : ''}
       <div style="margin-bottom: 12px;">
         <span class="badge" style="background: rgba(255,255,255,0.08); border:1px solid var(--border-color); color: var(--accent-gold); padding: 4px 10px; border-radius: 20px; font-size: 0.85rem;">${icon} ${article.category}</span>
       </div>
@@ -251,10 +268,12 @@ window.openDetailModal = function (articleId) {
         <span>작성자: <strong style="color: var(--text-primary);">${article.author}</strong></span>
         <span>•</span>
         <span>${article.date}</span>
+        <span>•</span>
+        <span>조회수 ${article.views}</span>
       </div>
       <div style="font-size: 1rem; color: var(--text-secondary); line-height: 1.8; white-space: pre-line; margin-bottom: 24px;">${article.content}</div>
 
-      <!-- 오직 관리자 계정일 때만 표시되는 버튼 -->
+      <!-- 오직 관리자(admin)로 로그인했을 때만 표시되는 버튼 -->
       ${isAdmin ? `
         <div style="display: flex; justify-content: flex-end; gap: 10px; border-top: 1px solid var(--border-color); padding-top: 16px;">
           <button class="btn btn-ghost" onclick="editArticle(${article.id}, event)" style="font-size: 0.85rem; padding: 8px 14px;">✏️ 기사 수정</button>
@@ -298,7 +317,7 @@ window.setCategory = function (category) {
   renderArticles();
 };
 
-/* ===== Articles Render ===== */
+/* ===== Articles Render & Actions ===== */
 function renderArticles() {
   const grid = document.getElementById('articlesGrid');
   if (!grid) return;
@@ -317,7 +336,7 @@ function renderArticles() {
     );
   }
 
-  const isAdmin = checkIsAdmin();
+  const isAdmin = currentUser && currentUser.role === 'admin';
 
   if (filtered.length === 0) {
     grid.innerHTML = `
@@ -334,16 +353,22 @@ function renderArticles() {
     const icon = getCategoryIcon(article.category);
     return `
       <div class="article-card" onclick="openDetailModal(${article.id})" style="cursor:pointer;">
+        <div class="article-card-img-container">
+          ${article.image
+        ? `<img src="${article.image}" class="article-card-img" alt="${article.title}" loading="lazy">`
+        : `<div class="article-card-img-placeholder" style="font-size:2rem; text-align:center; padding: 30px;">${icon}</div>`
+      }
+        </div>
         <div class="article-card-body" style="padding: 16px;">
           <span class="badge badge-${article.category}">${icon} ${article.category}</span>
           <h3 class="article-card-title" style="margin: 10px 0; font-size: 1.1rem;">${article.title}</h3>
-          <p class="article-card-excerpt" style="color:var(--text-secondary); font-size:0.9rem;">${article.summary || article.content.substring(0, 60)}...</p>
+          <p class="article-card-excerpt" style="color:var(--text-secondary); font-size:0.9rem;">${article.excerpt || article.content.substring(0, 60)}...</p>
           <div class="article-card-meta" style="margin-top:12px; display:flex; justify-content:space-between; align-items:center; font-size:0.8rem; color:var(--text-muted);">
             <div>
               <span>${article.author}</span> • <span>${article.date}</span>
             </div>
 
-            <!-- 관리자만 보는 수정/삭제 버튼 -->
+            <!-- 오직 관리자(admin)로 로그인했을 때만 표시되는 버튼 -->
             ${isAdmin ? `
               <div style="display:flex; gap:6px;">
                 <button class="action-btn edit" onclick="editArticle(${article.id}, event)" title="수정" style="padding: 3px 7px; border-radius: 4px; border: 1px solid var(--border-color); background: var(--bg-card); cursor: pointer;">✏️</button>
@@ -357,41 +382,33 @@ function renderArticles() {
   }).join('');
 }
 
-/* ===== 기사 삭제 (서버 API 연동) ===== */
-window.deleteArticle = async function (id, event) {
+/* ===== 기사 삭제 처리 (관리자 권한 검사) ===== */
+window.deleteArticle = function (id, event) {
   if (event) event.stopPropagation();
 
-  if (!checkIsAdmin()) {
+  if (!currentUser || currentUser.role !== 'admin') {
     showToast('관리자만 기사를 삭제할 수 있습니다.', 'error');
     return;
   }
 
-  if (!confirm('정말 이 기사를 삭제하시겠습니까?')) return;
+  const article = articles.find(a => a.id === Number(id));
+  if (!article) return;
 
-  try {
-    const res = await fetch(`${API_BASE}/articles/${id}`, {
-      method: 'DELETE',
-      headers: {
-        'Authorization': `Bearer ${token}`
-      }
-    });
+  if (!confirm('정말 이 기사를 삭제하시겠습니까? (관리자 권한)')) return;
 
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.message);
+  articles = articles.filter(a => a.id !== Number(id));
+  localStorage.setItem('articles', JSON.stringify(articles));
 
-    showToast('게시글이 삭제되었습니다.', 'info');
-    closeDetailModal();
-    fetchArticles();
-  } catch (err) {
-    showToast(err.message || '삭제에 실패했습니다.', 'error');
-  }
+  closeDetailModal();
+  renderArticles();
+  showToast('기사가 삭제되었습니다.', 'info');
 };
 
-/* ===== 기사 수정 ===== */
+/* ===== 기사 수정 처리 (관리자 권한 검사) ===== */
 window.editArticle = function (id, event) {
   if (event) event.stopPropagation();
 
-  if (!checkIsAdmin()) {
+  if (!currentUser || currentUser.role !== 'admin') {
     showToast('관리자만 기사를 수정할 수 있습니다.', 'error');
     return;
   }
@@ -400,19 +417,19 @@ window.editArticle = function (id, event) {
   window.openWriteModal(id);
 };
 
-/* ===== Header UI Render ===== */
+/* ===== Header & UI Handling ===== */
 function renderHeaderUserUI() {
   const userArea = document.getElementById('userArea');
   const loginBtn = document.getElementById('loginBtn');
   const writeBtn = document.getElementById('writeBtn');
 
-  const isAdmin = checkIsAdmin();
+  const isAdmin = currentUser && currentUser.role === 'admin';
 
   if (currentUser) {
     if (loginBtn) loginBtn.style.display = 'none';
     if (userArea) {
       userArea.style.display = 'flex';
-      document.getElementById('userNameDisplay').textContent = `${currentUser.name} (${currentUser.username})`;
+      document.getElementById('userNameDisplay').textContent = `${currentUser.name} ${isAdmin ? '(관리자)' : ''}`;
     }
     if (writeBtn) writeBtn.style.display = 'inline-flex';
   } else {
@@ -440,104 +457,184 @@ function setupEventListeners() {
     });
   });
 
-  // 로그인 폼 제출 (서버 API 호출)
   const loginForm = document.getElementById('loginForm');
   if (loginForm) {
-    loginForm.addEventListener('submit', async (e) => {
+    loginForm.addEventListener('submit', (e) => {
       e.preventDefault();
-      const usernameInput = document.getElementById('loginId');
-      const passwordInput = document.getElementById('loginPassword');
+      const loginId = document.getElementById('loginId').value;
+      if (!loginId) return;
 
-      const username = usernameInput ? usernameInput.value.trim() : '';
-      const password = passwordInput ? passwordInput.value : '';
+      // 'admin' 또는 '관리자' 아이디로 로그인하면 관리자 권한(admin) 부여
+      const role = (loginId.toLowerCase() === 'admin' || loginId === '관리자') ? 'admin' : 'user';
 
-      if (!username || !password) {
-        showToast('아이디와 비밀번호를 모두 입력해주세요.', 'error');
-        return;
-      }
+      currentUser = { name: loginId, role: role };
+      localStorage.setItem('currentUser', JSON.stringify(currentUser));
 
-      try {
-        const res = await fetch(`${API_BASE}/auth/login`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ username, password })
-        });
+      renderHeaderUserUI();
+      renderArticles();
+      closeLoginModal();
 
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.message);
-
-        // 로그인 성공 시 토큰과 유저 정보 저장
-        token = data.token;
-        currentUser = data.user;
-
-        localStorage.setItem('token', token);
-        localStorage.setItem('currentUser', JSON.stringify(currentUser));
-
-        renderHeaderUserUI();
-        renderArticles();
-        closeLoginModal();
-
-        showToast(`${currentUser.name}님 환영합니다!`, 'success');
-      } catch (err) {
-        showToast(err.message || '로그인 실패', 'error');
-      }
+      showToast(`${loginId}님 환영합니다! ${role === 'admin' ? '(관리자 권한)' : ''}`, 'success');
     });
   }
 
-  // 기사 작성 및 수정 (서버 API 호출)
   const articleForm = document.getElementById('articleForm');
   if (articleForm) {
     articleForm.addEventListener('submit', async (e) => {
       e.preventDefault();
 
-      if (!token) {
+      if (!currentUser) {
         showToast('로그인이 필요합니다.', 'error');
         return;
       }
 
       const title = document.getElementById('artTitle').value;
       const category = document.getElementById('artCategory').value;
+      const author = document.getElementById('artAuthor').value;
       const content = document.getElementById('artContent').value;
-      const summary = content.substring(0, 100);
+      const fileInput = document.getElementById('imageInput');
 
-      const method = editingArticleId ? 'PUT' : 'POST';
-      const url = editingArticleId ? `${API_BASE}/articles/${editingArticleId}` : `${API_BASE}/articles`;
+      let finalImage = '';
+
+      if (fileInput && fileInput.files && fileInput.files[0]) {
+        try {
+          finalImage = await readImageFile(fileInput.files[0]);
+        } catch (err) {
+          console.error('이미지 읽기 실패', err);
+          showToast('이미지 용량이 너무 크거나 읽기에 실패했습니다.', 'error');
+          return;
+        }
+      }
+
+      const isPreviewVisible = document.getElementById('imagePreviewContainer')?.style.display !== 'none';
+
+      if (editingArticleId) {
+        if (currentUser.role !== 'admin') {
+          showToast('기사 수정은 관리자만 가능합니다.', 'error');
+          return;
+        }
+
+        articles = articles.map(a => {
+          if (a.id === editingArticleId) {
+            let updatedImage = a.image;
+            if (finalImage) {
+              updatedImage = finalImage;
+            } else if (!isPreviewVisible) {
+              updatedImage = '';
+            }
+            return { ...a, title, category, author, content, image: updatedImage };
+          }
+          return a;
+        });
+        showToast('기사가 수정되었습니다.', 'success');
+      } else {
+        const newArticle = {
+          id: Date.now(),
+          title,
+          category,
+          content,
+          image: finalImage,
+          author: author || currentUser.name,
+          date: new Date().toISOString().split('T')[0],
+          views: 0
+        };
+        articles.unshift(newArticle);
+        showToast('새 기사가 등록되었습니다.', 'success');
+      }
 
       try {
-        const res = await fetch(url, {
-          method,
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${token}`
-          },
-          body: JSON.stringify({ category, title, content, summary })
-        });
-
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.message);
-
-        showToast(editingArticleId ? '기사가 수정되었습니다.' : '새 기사가 등록되었습니다.', 'success');
-        fetchArticles();
-        closeWriteModal();
-      } catch (err) {
-        showToast(err.message || '저장에 실패했습니다.', 'error');
+        localStorage.setItem('articles', JSON.stringify(articles));
+      } catch (storageErr) {
+        showToast('저장 용량이 부족합니다. 이미지를 변경해 보세요.', 'error');
+        return;
       }
+
+      renderArticles();
+      closeWriteModal();
     });
   }
+
+  setupImageInputListener();
 }
 
-/* ===== Logout ===== */
+/* ===== Image Handling & Preview ===== */
+
+function setupImageInputListener() {
+  const fileInput = document.getElementById('imageInput');
+  const uploadArea = document.getElementById('uploadArea');
+  const previewContainer = document.getElementById('imagePreviewContainer');
+  const previewImg = document.getElementById('imagePreview');
+
+  if (!fileInput) return;
+
+  fileInput.addEventListener('change', (e) => {
+    const file = e.target.files && e.target.files[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onload = (evt) => {
+        if (previewImg) previewImg.src = evt.target.result;
+        if (uploadArea) uploadArea.style.display = 'none';
+        if (previewContainer) previewContainer.style.display = 'block';
+      };
+      reader.readAsDataURL(file);
+    }
+  });
+}
+
+window.clearImagePreview = function () {
+  const fileInput = document.getElementById('imageInput');
+  const uploadArea = document.getElementById('uploadArea');
+  const previewContainer = document.getElementById('imagePreviewContainer');
+  const previewImg = document.getElementById('imagePreview');
+
+  if (fileInput) fileInput.value = '';
+  if (previewImg) previewImg.src = '';
+  if (previewContainer) previewContainer.style.display = 'none';
+  if (uploadArea) uploadArea.style.display = 'block';
+};
+
+function readImageFile(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        let width = img.width;
+        let height = img.height;
+        const maxWidth = 800;
+
+        if (width > maxWidth) {
+          height = Math.round((height * maxWidth) / width);
+          width = maxWidth;
+        }
+
+        canvas.width = width;
+        canvas.height = height;
+
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, width, height);
+
+        resolve(canvas.toDataURL('image/jpeg', 0.7));
+      };
+      img.onerror = error => reject(error);
+      img.src = e.target.result;
+    };
+    reader.onerror = error => reject(error);
+    reader.readAsDataURL(file);
+  });
+}
+
+/* ===== User Logout & Toast Messages ===== */
+
 window.logout = function () {
-  token = null;
   currentUser = null;
-  localStorage.removeItem('token');
   localStorage.removeItem('currentUser');
   renderHeaderUserUI();
   renderArticles();
   showToast('로그아웃 되었습니다.', 'info');
 };
 
-/* ===== Toast Message ===== */
 function showToast(message, type = 'info') {
   let container = document.getElementById('toastContainer');
   if (!container) {
