@@ -1,5 +1,10 @@
+// ==========================================
+// ⚙️ 서버 주소 설정 (원하시는 주소로 직접 수정하세요)
+// ==========================================
+const SERVER_URL = 'http://localhost:3000'; // <- 원하시는 서버 URL 입력 (예: http://localhost:3000)
+const API_BASE = `${SERVER_URL}/api`;
+
 /* ===== App State ===== */
-const API_BASE = '/api';
 let token = localStorage.getItem('token') || null;
 let currentUser = JSON.parse(localStorage.getItem('currentUser')) || null;
 let articles = [];
@@ -7,7 +12,7 @@ let currentCategory = '전체';
 let searchQuery = '';
 let editingArticleId = null;
 
-// 카테고리 데이터
+// 카테고리 설정
 const categories = [
   { name: '전체', icon: '🌐' },
   { name: '날씨', icon: '🌤️' },
@@ -21,18 +26,18 @@ function getCategoryIcon(catName) {
   return found ? found.icon : '📰';
 }
 
-/* ===== DOM Loaded Initialization ===== */
+/* ===== DOM 로드 시 초기화 ===== */
 document.addEventListener('DOMContentLoaded', () => {
   initTheme();
   renderCategoryNav();
   renderHeaderUserUI();
   setupEventListeners();
 
-  // 서버에서 기사 목록 가져오기
+  // 기사 목록 가져오기
   fetchArticles();
 });
 
-/* ===== Theme Control (다크/라이트 모드) ===== */
+/* ===== 다크 / 라이트 테마 설정 ===== */
 function initTheme() {
   const savedTheme = localStorage.getItem('theme');
   const themeBtn = document.getElementById('themeBtn');
@@ -61,7 +66,7 @@ window.toggleTheme = function () {
   }
 };
 
-/* ===== 서버 API 연동 (기사 가져오기) ===== */
+/* ===== 서버 API 연동 (기사 목록 가져오기) ===== */
 async function fetchArticles() {
   try {
     const res = await fetch(`${API_BASE}/articles`);
@@ -73,7 +78,7 @@ async function fetchArticles() {
   }
 }
 
-/* ===== Global Modal Control Functions ===== */
+/* ===== 전역 모달 제어 함수 ===== */
 window.closeModal = function (modalId) {
   const modal = document.getElementById(modalId);
   if (modal) {
@@ -137,7 +142,7 @@ window.closeWriteModal = function () {
   editingArticleId = null;
 };
 
-/* ===== 기사 상세보기 모달 ===== */
+/* ===== 기사 상세 보기 모달 ===== */
 window.openDetailModal = function (articleId) {
   const article = articles.find(a => a.id === Number(articleId));
   if (!article) return;
@@ -160,7 +165,6 @@ window.openDetailModal = function (articleId) {
         </div>
         <div style="font-size: 1rem; color: var(--text-secondary); line-height: 1.8; white-space: pre-line; margin-bottom: 24px;">${article.content}</div>
 
-        <!-- 로그인되어 있다면 수정/삭제 버튼 노출 -->
         ${currentUser ? `
           <div style="display: flex; justify-content: flex-end; gap: 10px; border-top: 1px solid var(--border-color); padding-top: 16px;">
             <button class="btn btn-ghost" onclick="editArticle(${article.id}, event)" style="font-size: 0.85rem; padding: 8px 14px;">✏️ 수정</button>
@@ -177,7 +181,7 @@ window.openDetailModal = function (articleId) {
   }
 };
 
-/* ===== Category Navigation ===== */
+/* ===== 카테고리 네비게이션 ===== */
 function renderCategoryNav() {
   const catNav = document.getElementById('categoryNav');
   if (!catNav) return;
@@ -200,7 +204,7 @@ window.setCategory = function (category) {
   renderArticles();
 };
 
-/* ===== Articles Render ===== */
+/* ===== 기사 목록 렌더링 ===== */
 function renderArticles() {
   const grid = document.getElementById('articlesGrid');
   if (!grid) return;
@@ -252,7 +256,7 @@ function renderArticles() {
   }).join('');
 }
 
-/* ===== 삭제 (서버 API 호출) ===== */
+/* ===== 기사 삭제 요청 ===== */
 window.deleteArticle = async function (id, event) {
   if (event) event.stopPropagation();
 
@@ -275,14 +279,14 @@ window.deleteArticle = async function (id, event) {
   }
 };
 
-/* ===== 수정 ===== */
+/* ===== 기사 수정 ===== */
 window.editArticle = function (id, event) {
   if (event) event.stopPropagation();
   window.closeModal('detailModal');
   window.openWriteModal(id);
 };
 
-/* ===== Header UI ===== */
+/* ===== 헤더 사용자 영역 UI 렌더링 ===== */
 function renderHeaderUserUI() {
   const userArea = document.getElementById('userArea');
   const loginBtn = document.getElementById('loginBtn');
@@ -303,7 +307,7 @@ function renderHeaderUserUI() {
   }
 }
 
-/* ===== Event Listeners ===== */
+/* ===== 이벤트 리스너 바인딩 ===== */
 function setupEventListeners() {
   const searchInput = document.getElementById('searchInput');
   if (searchInput) {
@@ -313,7 +317,7 @@ function setupEventListeners() {
     });
   }
 
-  // 모달 배경 클릭 시 닫기
+  // 모달 배경 바깥 클릭 시 닫기
   document.querySelectorAll('.modal-overlay').forEach(overlay => {
     overlay.addEventListener('click', (e) => {
       if (e.target === overlay) {
@@ -322,13 +326,13 @@ function setupEventListeners() {
     });
   });
 
-  // 로그인 폼 제출
+  // 로그인 폼 제출 처리
   const loginForm = document.getElementById('loginForm');
   if (loginForm) {
     loginForm.addEventListener('submit', async (e) => {
       e.preventDefault();
       const usernameInput = document.getElementById('loginId');
-      const passwordInput = document.getElementById('loginPw'); // index.html에 맞춰 loginPw로 지정
+      const passwordInput = document.getElementById('loginPw');
       const errDiv = document.getElementById('loginError');
 
       const username = usernameInput ? usernameInput.value.trim() : '';
@@ -372,7 +376,7 @@ function setupEventListeners() {
     });
   }
 
-  // 기사 작성/수정 폼 제출
+  // 기사 작성/수정 폼 제출 처리
   const articleForm = document.getElementById('articleForm');
   if (articleForm) {
     articleForm.addEventListener('submit', async (e) => {
@@ -414,7 +418,7 @@ function setupEventListeners() {
   }
 }
 
-/* ===== Logout ===== */
+/* ===== 로그아웃 ===== */
 window.logout = function () {
   token = null;
   currentUser = null;
@@ -436,7 +440,7 @@ window.clearImagePreview = function () {
   if (uploadArea) uploadArea.style.display = 'block';
 };
 
-/* ===== Toast Message ===== */
+/* ===== 토스트 알림 메시지 ===== */
 function showToast(message, type = 'info') {
   let container = document.getElementById('toastContainer');
   if (!container) return;
