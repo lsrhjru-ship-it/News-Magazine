@@ -120,7 +120,12 @@ async function fetchArticles() {
 /* ===== 히어로 섹션 ===== */
 function renderHeroSection() {
   const heroSection = document.getElementById('heroSection');
-  if (!heroSection || articles.length === 0) return;
+  if (!heroSection) return;
+
+  if (!articles || articles.length === 0) {
+    heroSection.innerHTML = '';
+    return;
+  }
 
   const mainArticle = articles[0];
   const icon = getCategoryIcon(mainArticle.category);
@@ -213,7 +218,6 @@ window.closeWriteModal = function () {
 /* ===== 기사 상세 보기 (조회수 +1 연동) ===== */
 window.openDetailModal = async function (articleId) {
   try {
-    // 백엔드로 상세 조회를 요청해 조회수를 +1 시키고 최신 데이터 수신
     const res = await fetch(`${API_BASE}/articles/${articleId}`);
     if (!res.ok) throw new Error('기사를 불러오지 못했습니다.');
     
@@ -490,21 +494,35 @@ function setupEventListeners() {
     });
   }
 
-  // 기사 작성/수정 폼 제출
+  // 💡 기사 작성/수정 폼 제출 (저장 처리 안정성 강화)
   const articleForm = document.getElementById('articleForm');
   if (articleForm) {
     articleForm.addEventListener('submit', async (e) => {
       e.preventDefault();
 
       if (!token) {
-        showToast('로그인이 필요합니다.', 'error');
+        showToast('로그인이 필요합니다. 다시 로그인해 주세요.', 'error');
+        openLoginModal();
         return;
       }
 
-      const title = document.getElementById('artTitle').value;
-      const category = document.getElementById('artCategory').value;
-      const content = document.getElementById('artContent').value;
+      const titleInput = document.getElementById('artTitle');
+      const categoryInput = document.getElementById('artCategory');
+      const contentInput = document.getElementById('artContent');
+
+      const title = titleInput ? titleInput.value.trim() : '';
+      const category = categoryInput ? categoryInput.value : '기타';
+      const content = contentInput ? contentInput.value.trim() : '';
       const summary = content.substring(0, 100);
+
+      if (!title) {
+        showToast('기사 제목을 입력해 주세요.', 'error');
+        return;
+      }
+      if (!content) {
+        showToast('기사 내용을 입력해 주세요.', 'error');
+        return;
+      }
 
       const method = editingArticleId ? 'PUT' : 'POST';
       const url = editingArticleId ? `${API_BASE}/articles/${editingArticleId}` : `${API_BASE}/articles`;
@@ -526,11 +544,12 @@ function setupEventListeners() {
         });
 
         const data = await res.json();
-        if (!res.ok) throw new Error(data.message);
+        if (!res.ok) throw new Error(data.message || '저장 실패');
 
         showToast(editingArticleId ? '기사가 수정되었습니다.' : '새 기사가 등록되었습니다.', 'success');
-        fetchArticles();
+        
         closeWriteModal();
+        await fetchArticles();
       } catch (err) {
         showToast(err.message || '저장에 실패했습니다.', 'error');
       }
