@@ -1,7 +1,7 @@
 // ==========================================
 // ⚙️ 서버 주소 설정 (필요시 도메인 변경)
 // ==========================================
-const SERVER_URL = 'http://localhost:3000';
+const SERVER_URL = 'https://se-eaib.onrender.com';
 const API_BASE = `${SERVER_URL}/api`;
 
 /* ===== App State ===== */
