@@ -1,7 +1,7 @@
 // ==========================================
 // ⚙️ 서버 주소 설정 (원하시는 주소로 직접 수정하세요)
 // ==========================================
-const SERVER_URL = 'http://localhost:3000'; // <- 원하시는 서버 URL 입력
+const SERVER_URL = 'https://news-magazine-1.onrender.com'; // <- 원하시는 서버 URL 입력
 const API_BASE = `${SERVER_URL}/api`;
 
 /* ===== App State ===== */
