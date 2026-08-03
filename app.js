@@ -3,7 +3,7 @@
 // ==========================================
 const SERVER_URL = window.location.origin.includes('onrender.com') 
   ? window.location.origin 
-  : 'http://localhost:3000'; // <- 로컬 테스트 시 해당 주소 사용
+  : 'https://news-magazine-1.onrender.com'; // <- 로컬 테스트 시 해당 주소 사용
 const API_BASE = `${SERVER_URL}/api`;
 
 /* ===== App State ===== */
