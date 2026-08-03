@@ -1,655 +1,190 @@
-/* ===== App State ===== */
-let articles = JSON.parse(localStorage.getItem('articles')) || [];
-let currentUser = JSON.parse(localStorage.getItem('currentUser')) || null;
-let currentCategory = '전체';
-let searchQuery = '';
-let editingArticleId = null;
+require('dotenv').config();
+const express = require('express');
+const cors = require('cors');
+const path = require('path');
+const Database = require('better-sqlite3');
+const bcrypt = require('bcryptjs');
+const jwt = require('jsonwebtoken');
 
-// 카테고리 데이터
-const categories = [
-  { name: '전체', icon: '🌐' },
-  { name: '날씨', icon: '🌤️' },
-  { name: '게임', icon: '🎮' },
-  { name: 'SNS', icon: '📱' },
-  { name: '스포츠', icon: '⚽' },
-  { name: '기상청', icon: '☀️' }
-];
+const app = express();
+const PORT = process.env.PORT || 3000;
+const JWT_SECRET = process.env.JWT_SECRET || 'secret';
 
-function getCategoryIcon(catName) {
-  const found = categories.find(c => c.name === catName);
-  return found ? found.icon : '📰';
+// SQLite 데이터베이스 연결
+const db = new Database(path.join(__dirname, 'blog.db'));
+
+// 테이블 생성
+db.exec(`
+  CREATE TABLE IF NOT EXISTS users (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    username TEXT UNIQUE NOT NULL,
+    password TEXT NOT NULL,
+    name TEXT NOT NULL,
+    role TEXT DEFAULT 'admin'
+  );
+
+  CREATE TABLE IF NOT EXISTS articles (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    category TEXT NOT NULL,
+    title TEXT NOT NULL,
+    author TEXT NOT NULL,
+    date TEXT NOT NULL,
+    summary TEXT,
+    content TEXT NOT NULL
+  );
+`);
+
+// users 테이블에 role 칼럼이 없는 경우를 대비한 자동 추가
+try {
+  db.exec(`ALTER TABLE users ADD COLUMN role TEXT DEFAULT 'admin';`);
+} catch (e) {
+  // 칼럼이 이미 존재하면 무시
 }
 
-/* ===== DOM Loaded Initialization ===== */
-document.addEventListener('DOMContentLoaded', () => {
-  initTheme();
-  renderCategoryNav();
-  renderHeaderUserUI();
-  setupEventListeners();
+// 기본 관리자 계정 생성 및 권한 보장
+const initAdmin = async () => {
+  const adminUser = process.env.ADMIN_USERNAME || 'lsrhjru';
+  const adminPass = process.env.ADMIN_PASSWORD || 'lsr37733*';
+  const adminName = process.env.ADMIN_NAME || '관리자';
 
-  // 1. 기사 목록을 화면에 즉시 렌더링
-  renderArticles();
+  const row = db.prepare('SELECT * FROM users WHERE username = ?').get(adminUser);
+  if (!row) {
+    const hashedPassword = await bcrypt.hash(adminPass, 10);
+    db.prepare('INSERT INTO users (username, password, name, role) VALUES (?, ?, ?, ?)').run(adminUser, hashedPassword, adminName, 'admin');
+    console.log('✅ 관리자 계정이 새로 생성되었습니다.');
+  } else {
+    db.prepare('UPDATE users SET role = ? WHERE username = ?').run('admin', adminUser);
+    console.log('✅ 관리자 계정 권한이 보장되었습니다.');
+  }
+};
+initAdmin();
 
-  // 2. 날씨 API 및 GPS 수신은 백그라운드에서 비동기로 수행
-  fetchWeatherAndAutoCreateNews();
+// 미들웨어 설정
+app.use(cors());
+app.use(express.json());
+app.use(express.static(path.join(__dirname)));
+
+// JWT 검증 미들웨어
+const authenticateToken = (req, res, next) => {
+  const authHeader = req.headers['authorization'];
+  const token = authHeader && authHeader.split(' ')[1];
+
+  if (!token) return res.status(401).json({ message: '인증 토큰이 없습니다.' });
+
+  jwt.verify(token, JWT_SECRET, (err, user) => {
+    if (err) return res.status(403).json({ message: '유효하지 않거나 만료된 토큰입니다.' });
+    req.user = user;
+    next();
+  });
+};
+
+// --- API 라우트 ---
+
+// 1. 로그인 (JWT 토큰 내부 + 응답값 모두에 관리자 권한 포함)
+app.post('/api/auth/login', async (req, res) => {
+  const { username, password } = req.body;
+  try {
+    const user = db.prepare('SELECT * FROM users WHERE username = ?').get(username);
+    if (!user) {
+      return res.status(401).json({ message: '아이디 또는 비밀번호가 올바르지 않습니다.' });
+    }
+
+    const match = await bcrypt.compare(password, user.password);
+    if (!match) {
+      return res.status(401).json({ message: '아이디 또는 비밀번호가 올바르지 않습니다.' });
+    }
+
+    // app.js가 요구할 수 있는 모든 형태의 권한 객체 구성
+    const authPayload = {
+      id: user.id,
+      username: user.username,
+      name: user.name,
+      role: 'admin',
+      isAdmin: true,
+      admin: true,
+      is_admin: 1,
+      type: 'admin'
+    };
+
+    // 🔑 JWT 토큰 내부에도 권한 정보를 완전히 채워서 발급
+    const token = jwt.sign(authPayload, JWT_SECRET, { expiresIn: '12h' });
+
+    // HTTP 응답 바디에도 전파
+    res.json({
+      token,
+      user: authPayload,
+      ...authPayload
+    });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: '서버 에러가 발생했습니다.' });
+  }
 });
 
-/* ===== Theme Control (다크/라이트 모드) ===== */
-function initTheme() {
-  const savedTheme = localStorage.getItem('theme');
-  const themeBtn = document.getElementById('themeBtn');
-
-  if (savedTheme === 'light') {
-    document.body.classList.add('light-mode');
-    if (themeBtn) themeBtn.textContent = '🌙';
-  } else {
-    document.body.classList.remove('light-mode');
-    if (themeBtn) themeBtn.textContent = '☀️';
+// 2. 게시글 목록 조회
+app.get('/api/articles', (req, res) => {
+  try {
+    const articles = db.prepare('SELECT * FROM articles ORDER BY id DESC').all();
+    res.json(articles);
+  } catch (error) {
+    res.status(500).json({ message: '게시글 목록을 불러오지 못했습니다.' });
   }
-}
+});
 
-window.toggleTheme = function () {
-  const themeBtn = document.getElementById('themeBtn');
-  const isLight = document.body.classList.toggle('light-mode');
-
-  if (isLight) {
-    localStorage.setItem('theme', 'light');
-    if (themeBtn) themeBtn.textContent = '🌙';
-    showToast('라이트 모드로 변경되었습니다.', 'info');
-  } else {
-    localStorage.setItem('theme', 'dark');
-    if (themeBtn) themeBtn.textContent = '☀️';
-    showToast('다크 모드로 변경되었습니다.', 'info');
+// 3. 게시글 상세 조회
+app.get('/api/articles/:id', (req, res) => {
+  try {
+    const article = db.prepare('SELECT * FROM articles WHERE id = ?').get(req.params.id);
+    if (!article) return res.status(404).json({ message: '게시글을 찾을 수 없습니다.' });
+    res.json(article);
+  } catch (error) {
+    res.status(500).json({ message: '게시글을 불러오지 못했습니다.' });
   }
-};
+});
 
-/* ===== Weather & Location Integration ===== */
-async function fetchWeatherAndAutoCreateNews() {
-  let lat = 37.5665;
-  let lon = 126.9780;
-  let regionName = "내 지역";
-
-  if (navigator.geolocation) {
-    try {
-      const position = await new Promise((resolve, reject) => {
-        navigator.geolocation.getCurrentPosition(resolve, reject, { timeout: 1500 });
-      });
-      lat = position.coords.latitude;
-      lon = position.coords.longitude;
-    } catch (e) {
-      regionName = "전국";
-    }
-  }
+// 4. 게시글 작성
+app.post('/api/articles', authenticateToken, (req, res) => {
+  const { category, title, content, summary } = req.body;
+  const author = req.user.name || '관리자';
+  const date = new Date().toISOString().split('T')[0];
 
   try {
-    const weatherRes = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current_weather=true`);
-    const weatherData = await weatherRes.json();
+    const result = db.prepare(
+      'INSERT INTO articles (category, title, author, date, summary, content) VALUES (?, ?, ?, ?, ?, ?)'
+    ).run(category, title, author, date, summary || '', content);
 
-    if (regionName === "내 지역") {
-      try {
-        const geoRes = await fetch(`https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${lat}&longitude=${lon}&localityLanguage=ko`);
-        const geoData = await geoRes.json();
-        regionName = geoData.city || geoData.principalSubdivision || geoData.locality || "내 지역";
-      } catch (e) {
-        regionName = "내 지역";
-      }
-    }
-
-    if (weatherData && weatherData.current_weather) {
-      const weather = weatherData.current_weather;
-      const weatherText = getWeatherStatusText(weather.weathercode);
-      const temp = weather.temperature;
-      const wind = weather.windspeed;
-      const todayStr = new Date().toISOString().split('T')[0];
-
-      renderWeatherWidget(regionName, temp, weatherText, wind);
-
-      const hasTodayWeatherNews = articles.some(a => a.category === '기상청' && a.date === todayStr && a.isAuto);
-
-      if (!hasTodayWeatherNews) {
-        const weatherArticle = {
-          id: Date.now(),
-          title: `[기상청 속보] ${regionName} 현재 기온 ${temp}°C, '${weatherText}'`,
-          category: '기상청',
-          excerpt: `기상청 발표: ${regionName} 지역 현재 풍속 ${wind}km/h입니다.`,
-          content: `기상청에서 발표한 ${regionName} 지역 실시간 날씨 데이터입니다.\n\n- 현재 기온: ${temp}°C\n- 날씨 상태: ${weatherText}\n- 풍속: ${wind} km/h\n\n최신 기상 정보가 실시간 업데이트됩니다.`,
-          author: '기상청 자동시스템',
-          date: todayStr,
-          views: 1,
-          isAuto: true,
-          image: 'https://images.unsplash.com/photo-1592210454359-9043f067919b?w=800&q=80'
-        };
-
-        articles.unshift(weatherArticle);
-        localStorage.setItem('articles', JSON.stringify(articles));
-        renderArticles();
-      }
-    }
-  } catch (err) {
-    console.error('날씨 데이터 불러오기 실패:', err);
+    res.status(201).json({ id: result.lastInsertRowid, message: '게시글이 등록되었습니다.' });
+  } catch (error) {
+    res.status(500).json({ message: '게시글 등록에 실패했습니다.' });
   }
-}
+});
 
-function getWeatherStatusText(code) {
-  if (code === 0) return '맑음 ☀️';
-  if (code <= 3) return '구름 조금/흐림 ⛅';
-  if (code <= 48) return '안개 🌫️';
-  if (code <= 67) return '비 🌧️';
-  if (code <= 77) return '눈 ❄️';
-  return '소나기/강우 🌧️';
-}
+// 5. 게시글 수정
+app.put('/api/articles/:id', authenticateToken, (req, res) => {
+  const { category, title, content, summary } = req.body;
+  try {
+    const result = db.prepare(
+      'UPDATE articles SET category = ?, title = ?, content = ?, summary = ? WHERE id = ?'
+    ).run(category, title, content, summary || '', req.params.id);
 
-function renderWeatherWidget(region, temp, text, wind) {
-  let widget = document.getElementById('weatherWidget');
-  if (!widget) {
-    const grid = document.getElementById('articlesGrid');
-    if (grid) {
-      widget = document.createElement('div');
-      widget.id = 'weatherWidget';
-      grid.parentNode.insertBefore(widget, grid);
-    }
+    if (result.changes === 0) return res.status(404).json({ message: '게시글을 찾을 수 없습니다.' });
+    res.json({ message: '게시글이 수정되었습니다.' });
+  } catch (error) {
+    res.status(500).json({ message: '게시글 수정에 실패했습니다.' });
   }
+});
 
-  if (widget) {
-    widget.innerHTML = `
-      <div style="background: var(--bg-card); color: var(--text-primary); padding: 18px 24px; border-radius: 12px; margin: 20px 0; display: flex; align-items: center; justify-content: space-between; border: 1px solid var(--border-color);">
-        <div>
-          <span style="font-size: 0.85rem; color: #fbbf24; font-weight: bold;">☀️ 실시간 기상청 날씨 정보 (${region})</span>
-          <h3 style="margin: 4px 0 0 0; font-size: 1.3rem;">현재 기온 ${temp}°C (${text})</h3>
-        </div>
-        <div style="text-align: right; font-size: 0.9rem; color: var(--text-secondary);">
-          풍속: ${wind} km/h<br>
-          <span style="font-size: 0.75rem; color: #34d399;">● GPS 위치 수신됨</span>
-        </div>
-      </div>
-    `;
+// 6. 게시글 삭제
+app.delete('/api/articles/:id', authenticateToken, (req, res) => {
+  try {
+    const result = db.prepare('DELETE FROM articles WHERE id = ?').run(req.params.id);
+    if (result.changes === 0) return res.status(404).json({ message: '게시글을 찾을 수 없습니다.' });
+    res.json({ message: '게시글이 삭제되었습니다.' });
+  } catch (error) {
+    res.status(500).json({ message: '게시글 삭제에 실패했습니다.' });
   }
-}
-
-/* ===== Global Modal Control Functions ===== */
-
-window.closeModal = function (modalId) {
-  const modal = document.getElementById(modalId);
-  if (modal) {
-    modal.classList.remove('active', 'open', 'show');
-    modal.style.display = 'none';
-  }
-};
-
-window.openLoginModal = function () {
-  const modal = document.getElementById('loginModal');
-  if (modal) {
-    modal.style.display = 'flex';
-    modal.classList.add('active');
-  }
-};
-
-window.closeLoginModal = function () {
-  window.closeModal('loginModal');
-};
-
-window.openWriteModal = function (articleId = null) {
-  if (!currentUser) {
-    showToast('기사 작성/수정은 로그인 후 가능합니다.', 'error');
-    openLoginModal();
-    return;
-  }
-
-  if (articleId && currentUser.role !== 'admin') {
-    showToast('기사 수정은 관리자만 가능합니다.', 'error');
-    return;
-  }
-
-  const modal = document.getElementById('writeModal');
-  const title = document.getElementById('modalTitle');
-  const form = document.getElementById('articleForm');
-
-  editingArticleId = articleId;
-  clearImagePreview();
-
-  if (articleId) {
-    const article = articles.find(a => a.id === Number(articleId));
-    if (article) {
-      if (title) title.textContent = '✏️ 기사 수정 (관리자)';
-      if (document.getElementById('artTitle')) document.getElementById('artTitle').value = article.title;
-      if (document.getElementById('artCategory')) document.getElementById('artCategory').value = article.category;
-      if (document.getElementById('artAuthor')) document.getElementById('artAuthor').value = article.author;
-      if (document.getElementById('artContent')) document.getElementById('artContent').value = article.content;
-
-      if (article.image) {
-        const previewImg = document.getElementById('imagePreview');
-        const uploadArea = document.getElementById('uploadArea');
-        const previewContainer = document.getElementById('imagePreviewContainer');
-
-        if (previewImg) previewImg.src = article.image;
-        if (uploadArea) uploadArea.style.display = 'none';
-        if (previewContainer) previewContainer.style.display = 'block';
-      }
-    }
-  } else {
-    if (title) title.textContent = '✍️ 새 기사 작성';
-    if (form) form.reset();
-  }
-
-  if (modal) {
-    modal.style.display = 'flex';
-    modal.classList.add('active');
-  }
-};
-
-window.closeWriteModal = function () {
-  window.closeModal('writeModal');
-  editingArticleId = null;
-  clearImagePreview();
-};
-
-/* ===== 기사 상세보기 모달 ===== */
-window.openDetailModal = function (articleId) {
-  const article = articles.find(a => a.id === Number(articleId));
-  if (!article) return;
-
-  article.views = (article.views || 0) + 1;
-  localStorage.setItem('articles', JSON.stringify(articles));
-  renderArticles();
-
-  const modal = document.getElementById('detailModal');
-  const detailContent = document.getElementById('detailContent');
-  const icon = getCategoryIcon(article.category);
-  const isAdmin = currentUser && currentUser.role === 'admin';
-
-  if (detailContent) {
-    detailContent.innerHTML = `
-      ${article.image ? `<img src="${article.image}" style="width: 100%; max-height: 320px; object-fit: cover; border-radius: 12px; margin-bottom: 20px;" alt="${article.title}" loading="lazy">` : ''}
-      <div style="margin-bottom: 12px;">
-        <span class="badge" style="background: rgba(255,255,255,0.08); border:1px solid var(--border-color); color: var(--accent-gold); padding: 4px 10px; border-radius: 20px; font-size: 0.85rem;">${icon} ${article.category}</span>
-      </div>
-      <h2 style="font-size: 1.5rem; margin-bottom: 12px; line-height: 1.4; font-weight: 700;">${article.title}</h2>
-      <div style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 20px; display: flex; gap: 8px; align-items: center; border-bottom: 1px solid var(--border-color); padding-bottom: 12px;">
-        <span>작성자: <strong style="color: var(--text-primary);">${article.author}</strong></span>
-        <span>•</span>
-        <span>${article.date}</span>
-        <span>•</span>
-        <span>조회수 ${article.views}</span>
-      </div>
-      <div style="font-size: 1rem; color: var(--text-secondary); line-height: 1.8; white-space: pre-line; margin-bottom: 24px;">${article.content}</div>
-
-      <!-- 오직 관리자(admin)로 로그인했을 때만 표시되는 버튼 -->
-      ${isAdmin ? `
-        <div style="display: flex; justify-content: flex-end; gap: 10px; border-top: 1px solid var(--border-color); padding-top: 16px;">
-          <button class="btn btn-ghost" onclick="editArticle(${article.id}, event)" style="font-size: 0.85rem; padding: 8px 14px;">✏️ 기사 수정</button>
-          <button class="btn" onclick="deleteArticle(${article.id}, event)" style="background: rgba(232,85,85,0.15); color: #f87171; border: 1px solid rgba(232,85,85,0.3); font-size: 0.85rem; padding: 8px 14px;">🗑️ 기사 삭제</button>
-        </div>
-      ` : ''}
-    `;
-  }
-
-  if (modal) {
-    modal.style.display = 'flex';
-    modal.classList.add('active');
-  }
-};
-
-window.closeDetailModal = function () {
-  window.closeModal('detailModal');
-};
-
-/* ===== Category Navigation & Render ===== */
-function renderCategoryNav() {
-  const catNav = document.getElementById('categoryNav');
-  if (!catNav) return;
-
-  catNav.innerHTML = categories.map(cat => `
-    <button 
-      class="cat-btn ${cat.name === currentCategory ? 'active' : ''}" 
-      data-category="${cat.name}"
-      onclick="setCategory('${cat.name}')"
-    >
-      <span class="cat-icon">${cat.icon}</span> ${cat.name}
-    </button>
-  `).join('');
-}
-
-window.setCategory = function (category) {
-  currentCategory = category;
-  document.querySelectorAll('.cat-btn').forEach(btn => {
-    btn.classList.toggle('active', btn.dataset.category === category);
-  });
-  renderArticles();
-};
-
-/* ===== Articles Render & Actions ===== */
-function renderArticles() {
-  const grid = document.getElementById('articlesGrid');
-  if (!grid) return;
-
-  let filtered = articles;
-
-  if (currentCategory !== '전체') {
-    filtered = filtered.filter(a => a.category === currentCategory);
-  }
-
-  if (searchQuery.trim()) {
-    const q = searchQuery.toLowerCase();
-    filtered = filtered.filter(a =>
-      a.title.toLowerCase().includes(q) ||
-      a.content.toLowerCase().includes(q)
-    );
-  }
-
-  const isAdmin = currentUser && currentUser.role === 'admin';
-
-  if (filtered.length === 0) {
-    grid.innerHTML = `
-      <div class="empty-state" style="text-align:center; padding: 40px; width: 100%;">
-        <div style="font-size: 3rem;">📰</div>
-        <h3>등록된 기사가 없습니다</h3>
-        <button class="btn btn-gold" onclick="openWriteModal()" style="margin-top:12px;">첫 기사 작성하기</button>
-      </div>
-    `;
-    return;
-  }
-
-  grid.innerHTML = filtered.map(article => {
-    const icon = getCategoryIcon(article.category);
-    return `
-      <div class="article-card" onclick="openDetailModal(${article.id})" style="cursor:pointer;">
-        <div class="article-card-img-container">
-          ${article.image
-        ? `<img src="${article.image}" class="article-card-img" alt="${article.title}" loading="lazy">`
-        : `<div class="article-card-img-placeholder" style="font-size:2rem; text-align:center; padding: 30px;">${icon}</div>`
-      }
-        </div>
-        <div class="article-card-body" style="padding: 16px;">
-          <span class="badge badge-${article.category}">${icon} ${article.category}</span>
-          <h3 class="article-card-title" style="margin: 10px 0; font-size: 1.1rem;">${article.title}</h3>
-          <p class="article-card-excerpt" style="color:var(--text-secondary); font-size:0.9rem;">${article.excerpt || article.content.substring(0, 60)}...</p>
-          <div class="article-card-meta" style="margin-top:12px; display:flex; justify-content:space-between; align-items:center; font-size:0.8rem; color:var(--text-muted);">
-            <div>
-              <span>${article.author}</span> • <span>${article.date}</span>
-            </div>
-
-            <!-- 오직 관리자(admin)로 로그인했을 때만 표시되는 버튼 -->
-            ${isAdmin ? `
-              <div style="display:flex; gap:6px;">
-                <button class="action-btn edit" onclick="editArticle(${article.id}, event)" title="수정" style="padding: 3px 7px; border-radius: 4px; border: 1px solid var(--border-color); background: var(--bg-card); cursor: pointer;">✏️</button>
-                <button class="action-btn delete" onclick="deleteArticle(${article.id}, event)" title="삭제" style="padding: 3px 7px; border-radius: 4px; border: 1px solid var(--border-color); background: var(--bg-card); cursor: pointer;">🗑️</button>
-              </div>
-            ` : ''}
-          </div>
-        </div>
-      </div>
-    `;
-  }).join('');
-}
-
-/* ===== 기사 삭제 처리 (관리자 권한 검사) ===== */
-window.deleteArticle = function (id, event) {
-  if (event) event.stopPropagation();
-
-  if (!currentUser || currentUser.role !== 'admin') {
-    showToast('관리자만 기사를 삭제할 수 있습니다.', 'error');
-    return;
-  }
-
-  const article = articles.find(a => a.id === Number(id));
-  if (!article) return;
-
-  if (!confirm('정말 이 기사를 삭제하시겠습니까? (관리자 권한)')) return;
-
-  articles = articles.filter(a => a.id !== Number(id));
-  localStorage.setItem('articles', JSON.stringify(articles));
-
-  closeDetailModal();
-  renderArticles();
-  showToast('기사가 삭제되었습니다.', 'info');
-};
-
-/* ===== 기사 수정 처리 (관리자 권한 검사) ===== */
-window.editArticle = function (id, event) {
-  if (event) event.stopPropagation();
-
-  if (!currentUser || currentUser.role !== 'admin') {
-    showToast('관리자만 기사를 수정할 수 있습니다.', 'error');
-    return;
-  }
-
-  closeDetailModal();
-  window.openWriteModal(id);
-};
-
-/* ===== Header & UI Handling ===== */
-function renderHeaderUserUI() {
-  const userArea = document.getElementById('userArea');
-  const loginBtn = document.getElementById('loginBtn');
-  const writeBtn = document.getElementById('writeBtn');
-
-  const isAdmin = currentUser && currentUser.role === 'admin';
-
-  if (currentUser) {
-    if (loginBtn) loginBtn.style.display = 'none';
-    if (userArea) {
-      userArea.style.display = 'flex';
-      document.getElementById('userNameDisplay').textContent = `${currentUser.name} ${isAdmin ? '(관리자)' : ''}`;
-    }
-    if (writeBtn) writeBtn.style.display = 'inline-flex';
-  } else {
-    if (loginBtn) loginBtn.style.display = 'inline-flex';
-    if (userArea) userArea.style.display = 'none';
-    if (writeBtn) writeBtn.style.display = 'none';
-  }
-}
-
-/* ===== Event Listeners Setup ===== */
-function setupEventListeners() {
-  const searchInput = document.getElementById('searchInput');
-  if (searchInput) {
-    searchInput.addEventListener('input', (e) => {
-      searchQuery = e.target.value;
-      renderArticles();
-    });
-  }
-
-  document.querySelectorAll('.modal-overlay').forEach(overlay => {
-    overlay.addEventListener('click', (e) => {
-      if (e.target === overlay) {
-        window.closeModal(overlay.id);
-      }
-    });
-  });
-
-  const loginForm = document.getElementById('loginForm');
-  if (loginForm) {
-    loginForm.addEventListener('submit', (e) => {
-      e.preventDefault();
-      const loginId = document.getElementById('loginId').value;
-      if (!loginId) return;
-
-      // 'admin' 또는 '관리자' 아이디로 로그인하면 관리자 권한(admin) 부여
-      const role = (loginId.toLowerCase() === 'admin' || loginId === '관리자') ? 'admin' : 'user';
-
-      currentUser = { name: loginId, role: role };
-      localStorage.setItem('currentUser', JSON.stringify(currentUser));
-
-      renderHeaderUserUI();
-      renderArticles();
-      closeLoginModal();
-
-      showToast(`${loginId}님 환영합니다! ${role === 'admin' ? '(관리자 권한)' : ''}`, 'success');
-    });
-  }
-
-  const articleForm = document.getElementById('articleForm');
-  if (articleForm) {
-    articleForm.addEventListener('submit', async (e) => {
-      e.preventDefault();
-
-      if (!currentUser) {
-        showToast('로그인이 필요합니다.', 'error');
-        return;
-      }
-
-      const title = document.getElementById('artTitle').value;
-      const category = document.getElementById('artCategory').value;
-      const author = document.getElementById('artAuthor').value;
-      const content = document.getElementById('artContent').value;
-      const fileInput = document.getElementById('imageInput');
-
-      let finalImage = '';
-
-      if (fileInput && fileInput.files && fileInput.files[0]) {
-        try {
-          finalImage = await readImageFile(fileInput.files[0]);
-        } catch (err) {
-          console.error('이미지 읽기 실패', err);
-          showToast('이미지 용량이 너무 크거나 읽기에 실패했습니다.', 'error');
-          return;
-        }
-      }
-
-      const isPreviewVisible = document.getElementById('imagePreviewContainer')?.style.display !== 'none';
-
-      if (editingArticleId) {
-        if (currentUser.role !== 'admin') {
-          showToast('기사 수정은 관리자만 가능합니다.', 'error');
-          return;
-        }
-
-        articles = articles.map(a => {
-          if (a.id === editingArticleId) {
-            let updatedImage = a.image;
-            if (finalImage) {
-              updatedImage = finalImage;
-            } else if (!isPreviewVisible) {
-              updatedImage = '';
-            }
-            return { ...a, title, category, author, content, image: updatedImage };
-          }
-          return a;
-        });
-        showToast('기사가 수정되었습니다.', 'success');
-      } else {
-        const newArticle = {
-          id: Date.now(),
-          title,
-          category,
-          content,
-          image: finalImage,
-          author: author || currentUser.name,
-          date: new Date().toISOString().split('T')[0],
-          views: 0
-        };
-        articles.unshift(newArticle);
-        showToast('새 기사가 등록되었습니다.', 'success');
-      }
-
-      try {
-        localStorage.setItem('articles', JSON.stringify(articles));
-      } catch (storageErr) {
-        showToast('저장 용량이 부족합니다. 이미지를 변경해 보세요.', 'error');
-        return;
-      }
-
-      renderArticles();
-      closeWriteModal();
-    });
-  }
-
-  setupImageInputListener();
-}
-
-/* ===== Image Handling & Preview ===== */
-
-function setupImageInputListener() {
-  const fileInput = document.getElementById('imageInput');
-  const uploadArea = document.getElementById('uploadArea');
-  const previewContainer = document.getElementById('imagePreviewContainer');
-  const previewImg = document.getElementById('imagePreview');
-
-  if (!fileInput) return;
-
-  fileInput.addEventListener('change', (e) => {
-    const file = e.target.files && e.target.files[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onload = (evt) => {
-        if (previewImg) previewImg.src = evt.target.result;
-        if (uploadArea) uploadArea.style.display = 'none';
-        if (previewContainer) previewContainer.style.display = 'block';
-      };
-      reader.readAsDataURL(file);
-    }
-  });
-}
-
-window.clearImagePreview = function () {
-  const fileInput = document.getElementById('imageInput');
-  const uploadArea = document.getElementById('uploadArea');
-  const previewContainer = document.getElementById('imagePreviewContainer');
-  const previewImg = document.getElementById('imagePreview');
-
-  if (fileInput) fileInput.value = '';
-  if (previewImg) previewImg.src = '';
-  if (previewContainer) previewContainer.style.display = 'none';
-  if (uploadArea) uploadArea.style.display = 'block';
-};
-
-function readImageFile(file) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      const img = new Image();
-      img.onload = () => {
-        const canvas = document.createElement('canvas');
-        let width = img.width;
-        let height = img.height;
-        const maxWidth = 800;
-
-        if (width > maxWidth) {
-          height = Math.round((height * maxWidth) / width);
-          width = maxWidth;
-        }
-
-        canvas.width = width;
-        canvas.height = height;
-
-        const ctx = canvas.getContext('2d');
-        ctx.drawImage(img, 0, 0, width, height);
-
-        resolve(canvas.toDataURL('image/jpeg', 0.7));
-      };
-      img.onerror = error => reject(error);
-      img.src = e.target.result;
-    };
-    reader.onerror = error => reject(error);
-    reader.readAsDataURL(file);
-  });
-}
-
-/* ===== User Logout & Toast Messages ===== */
-
-window.logout = function () {
-  currentUser = null;
-  localStorage.removeItem('currentUser');
-  renderHeaderUserUI();
-  renderArticles();
-  showToast('로그아웃 되었습니다.', 'info');
-};
-
-function showToast(message, type = 'info') {
-  let container = document.getElementById('toastContainer');
-  if (!container) {
-    container = document.createElement('div');
-    container.id = 'toastContainer';
-    document.body.appendChild(container);
-  }
-
-  const toast = document.createElement('div');
-  toast.className = `toast ${type}`;
-  toast.style.cssText = "padding: 12px 20px; margin-top: 10px; background: #1e293b; color: #fff; border-radius: 8px; font-size: 0.9rem; position: fixed; bottom: 20px; right: 20px; z-index: 9999; border: 1px solid rgba(255,255,255,0.1);";
-  toast.innerHTML = `<span>${message}</span>`;
-  container.appendChild(toast);
-
-  setTimeout(() => {
-    toast.remove();
-  }, 3000);
-}
+});
+
+app.listen(PORT, () => {
+  console.log(`🚀 서버가 실행되었습니다: http://localhost:${PORT}`);
+});
