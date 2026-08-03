@@ -8,8 +8,10 @@ let editingArticleId = null;
 // 카테고리 데이터
 const categories = [
   { name: '전체', icon: '🌐' },
+  { name: '날씨', icon: '🌤️' },
   { name: '게임', icon: '🎮' },
   { name: 'SNS', icon: '📱' },
+  { name: '스포츠', icon: '⚽' },
   { name: '기상청', icon: '☀️' }
 ];
 
@@ -20,11 +22,11 @@ function getCategoryIcon(catName) {
 
 /* ===== DOM Loaded Initialization ===== */
 document.addEventListener('DOMContentLoaded', async () => {
-  initTheme(); // 테마 초기화
+  initTheme();
   renderCategoryNav();
   renderHeaderUserUI();
   setupEventListeners();
-  
+
   await fetchWeatherAndAutoCreateNews();
   renderArticles();
 });
@@ -33,7 +35,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 function initTheme() {
   const savedTheme = localStorage.getItem('theme');
   const themeBtn = document.getElementById('themeBtn');
-  
+
   if (savedTheme === 'light') {
     document.body.classList.add('light-mode');
     if (themeBtn) themeBtn.textContent = '🌙';
@@ -46,7 +48,7 @@ function initTheme() {
 window.toggleTheme = function () {
   const themeBtn = document.getElementById('themeBtn');
   const isLight = document.body.classList.toggle('light-mode');
-  
+
   if (isLight) {
     localStorage.setItem('theme', 'light');
     if (themeBtn) themeBtn.textContent = '🌙';
@@ -146,12 +148,12 @@ function renderWeatherWidget(region, temp, text, wind) {
 
   if (widget) {
     widget.innerHTML = `
-      <div style="background: var(--card-bg, #1e293b); color: var(--text-color, #fff); padding: 18px 24px; border-radius: 12px; margin: 20px 0; display: flex; align-items: center; justify-content: space-between; border: 1px solid rgba(255,255,255,0.1);">
+      <div style="background: var(--bg-card); color: var(--text-primary); padding: 18px 24px; border-radius: 12px; margin: 20px 0; display: flex; align-items: center; justify-content: space-between; border: 1px solid var(--border-color);">
         <div>
           <span style="font-size: 0.85rem; color: #fbbf24; font-weight: bold;">☀️ 실시간 기상청 날씨 정보 (${region})</span>
           <h3 style="margin: 4px 0 0 0; font-size: 1.3rem;">현재 기온 ${temp}°C (${text})</h3>
         </div>
-        <div style="text-align: right; font-size: 0.9rem; color: #94a3b8;">
+        <div style="text-align: right; font-size: 0.9rem; color: var(--text-secondary);">
           풍속: ${wind} km/h<br>
           <span style="font-size: 0.75rem; color: #34d399;">● GPS 위치 수신됨</span>
         </div>
@@ -162,7 +164,7 @@ function renderWeatherWidget(region, temp, text, wind) {
 
 /* ===== Global Modal Control Functions ===== */
 
-window.closeModal = function(modalId) {
+window.closeModal = function (modalId) {
   const modal = document.getElementById(modalId);
   if (modal) {
     modal.classList.remove('active', 'open', 'show');
@@ -235,21 +237,19 @@ window.openDetailModal = function (articleId) {
 
   if (detailContent) {
     detailContent.innerHTML = `
-      <div style="padding: 24px;">
-        ${article.image ? `<img src="${article.image}" style="width: 100%; max-height: 380px; object-fit: cover; border-radius: 12px; margin-bottom: 20px;" alt="${article.title}">` : ''}
-        <div style="margin-bottom: 12px;">
-          <span class="badge" style="background: rgba(255,255,255,0.1); padding: 6px 12px; border-radius: 20px; font-size: 0.85rem;">${icon} ${article.category}</span>
-        </div>
-        <h2 style="font-size: 1.6rem; margin-bottom: 14px; line-height: 1.4; font-weight: 700;">${article.title}</h2>
-        <div style="font-size: 0.85rem; color: #94a3b8; margin-bottom: 20px; display: flex; gap: 10px; align-items: center; border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 14px;">
-          <span>작성자: <strong>${article.author}</strong></span>
-          <span>•</span>
-          <span>${article.date}</span>
-          <span>•</span>
-          <span>조회수 ${article.views}</span>
-        </div>
-        <div style="font-size: 1.05rem; line-height: 1.8; white-space: pre-line;">${article.content}</div>
+      ${article.image ? `<img src="${article.image}" style="width: 100%; max-height: 320px; object-fit: cover; border-radius: 12px; margin-bottom: 20px;" alt="${article.title}">` : ''}
+      <div style="margin-bottom: 12px;">
+        <span class="badge" style="background: rgba(255,255,255,0.08); border:1px solid var(--border-color); color: var(--accent-gold); padding: 4px 10px; border-radius: 20px; font-size: 0.85rem;">${icon} ${article.category}</span>
       </div>
+      <h2 style="font-size: 1.5rem; margin-bottom: 12px; line-height: 1.4; font-weight: 700;">${article.title}</h2>
+      <div style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 20px; display: flex; gap: 8px; align-items: center; border-bottom: 1px solid var(--border-color); padding-bottom: 12px;">
+        <span>작성자: <strong style="color: var(--text-primary);">${article.author}</strong></span>
+        <span>•</span>
+        <span>${article.date}</span>
+        <span>•</span>
+        <span>조회수 ${article.views}</span>
+      </div>
+      <div style="font-size: 1rem; color: var(--text-secondary); line-height: 1.8; white-space: pre-line;">${article.content}</div>
     `;
   }
 
@@ -324,23 +324,23 @@ function renderArticles() {
     return `
       <div class="article-card" onclick="openDetailModal(${article.id})" style="cursor:pointer;">
         <div class="article-card-img-container">
-          ${article.image 
-            ? `<img src="${article.image}" class="article-card-img" alt="${article.title}">`
-            : `<div class="article-card-img-placeholder" style="font-size:2rem; text-align:center; padding: 30px;">${icon}</div>`
-          }
+          ${article.image
+        ? `<img src="${article.image}" class="article-card-img" alt="${article.title}">`
+        : `<div class="article-card-img-placeholder" style="font-size:2rem; text-align:center; padding: 30px;">${icon}</div>`
+      }
         </div>
         <div class="article-card-body" style="padding: 16px;">
           <span class="badge badge-${article.category}">${icon} ${article.category}</span>
           <h3 class="article-card-title" style="margin: 10px 0; font-size: 1.1rem;">${article.title}</h3>
-          <p class="article-card-excerpt" style="color:#94a3b8; font-size:0.9rem;">${article.excerpt || article.content.substring(0, 60)}...</p>
-          <div class="article-card-meta" style="margin-top:12px; display:flex; justify-content:space-between; align-items:center; font-size:0.8rem; color:#64748b;">
+          <p class="article-card-excerpt" style="color:var(--text-secondary); font-size:0.9rem;">${article.excerpt || article.content.substring(0, 60)}...</p>
+          <div class="article-card-meta" style="margin-top:12px; display:flex; justify-content:space-between; align-items:center; font-size:0.8rem; color:var(--text-muted);">
             <div>
               <span>${article.author}</span> • <span>${article.date}</span>
             </div>
             ${isAdmin ? `
-              <div>
-                <button class="btn-icon" onclick="editArticle(${article.id}, event)" title="수정">✏️</button>
-                <button class="btn-icon" onclick="deleteArticle(${article.id}, event)" title="삭제">🗑️</button>
+              <div style="display:flex; gap:4px;">
+                <button class="action-btn edit" onclick="editArticle(${article.id}, event)" title="수정">✏️</button>
+                <button class="action-btn delete" onclick="deleteArticle(${article.id}, event)" title="삭제">🗑️</button>
               </div>
             ` : ''}
           </div>
@@ -403,7 +403,6 @@ function setupEventListeners() {
     });
   }
 
-  // 모달 오버레이 바깥 누르면 닫기
   document.querySelectorAll('.modal-overlay').forEach(overlay => {
     overlay.addEventListener('click', (e) => {
       if (e.target === overlay) {
@@ -412,7 +411,6 @@ function setupEventListeners() {
     });
   });
 
-  // 로그인 폼
   const loginForm = document.getElementById('loginForm');
   if (loginForm) {
     loginForm.addEventListener('submit', (e) => {
@@ -424,16 +422,15 @@ function setupEventListeners() {
 
       currentUser = { name: loginId, role: role };
       localStorage.setItem('currentUser', JSON.stringify(currentUser));
-      
+
       renderHeaderUserUI();
       renderArticles();
       closeLoginModal();
-      
+
       showToast(`${loginId}님 환영합니다! ${role === 'admin' ? '(관리자 권한)' : ''}`, 'success');
     });
   }
 
-  // 기사 작성 및 파일 업로드 처리
   const articleForm = document.getElementById('articleForm');
   if (articleForm) {
     articleForm.addEventListener('submit', async (e) => {
@@ -517,7 +514,7 @@ function showToast(message, type = 'info') {
 
   const toast = document.createElement('div');
   toast.className = `toast ${type}`;
-  toast.style.cssText = "padding: 12px 20px; margin-top: 10px; background: #334155; color: #fff; border-radius: 8px; font-size: 0.9rem; position: fixed; bottom: 20px; right: 20px; z-index: 9999;";
+  toast.style.cssText = "padding: 12px 20px; margin-top: 10px; background: #1e293b; color: #fff; border-radius: 8px; font-size: 0.9rem; position: fixed; bottom: 20px; right: 20px; z-index: 9999; border: 1px solid rgba(255,255,255,0.1);";
   toast.innerHTML = `<span>${message}</span>`;
   container.appendChild(toast);
 
