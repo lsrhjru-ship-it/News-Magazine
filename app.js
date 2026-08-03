@@ -195,7 +195,6 @@ window.openWriteModal = function (articleId = null) {
     return;
   }
 
-  // 수정 시에는 추가로 관리자 권한 체크
   if (articleId && currentUser.role !== 'admin') {
     showToast('기사 수정은 관리자만 가능합니다.', 'error');
     return;
@@ -274,7 +273,7 @@ window.openDetailModal = function (articleId) {
       </div>
       <div style="font-size: 1rem; color: var(--text-secondary); line-height: 1.8; white-space: pre-line; margin-bottom: 24px;">${article.content}</div>
 
-      <!-- 관리자전용 수정/삭제 버튼 (관리자 로그인 시에만 노출) -->
+      <!-- 오직 관리자(admin)로 로그인했을 때만 표시되는 버튼 -->
       ${isAdmin ? `
         <div style="display: flex; justify-content: flex-end; gap: 10px; border-top: 1px solid var(--border-color); padding-top: 16px;">
           <button class="btn btn-ghost" onclick="editArticle(${article.id}, event)" style="font-size: 0.85rem; padding: 8px 14px;">✏️ 기사 수정</button>
@@ -369,7 +368,7 @@ function renderArticles() {
               <span>${article.author}</span> • <span>${article.date}</span>
             </div>
 
-            <!-- 관리자 전용 수정/삭제 버튼 -->
+            <!-- 오직 관리자(admin)로 로그인했을 때만 표시되는 버튼 -->
             ${isAdmin ? `
               <div style="display:flex; gap:6px;">
                 <button class="action-btn edit" onclick="editArticle(${article.id}, event)" title="수정" style="padding: 3px 7px; border-radius: 4px; border: 1px solid var(--border-color); background: var(--bg-card); cursor: pointer;">✏️</button>
@@ -383,14 +382,12 @@ function renderArticles() {
   }).join('');
 }
 
-/* ===== 기사 삭제 처리 (관리자 전용) ===== */
+/* ===== 기사 삭제 처리 (관리자 권한 검사) ===== */
 window.deleteArticle = function (id, event) {
   if (event) event.stopPropagation();
 
-  // 오직 관리자만 삭제 가능
   if (!currentUser || currentUser.role !== 'admin') {
-    showToast('기사 삭제 권한이 없습니다. (관리자 전용)', 'error');
-    if (!currentUser) openLoginModal();
+    showToast('관리자만 기사를 삭제할 수 있습니다.', 'error');
     return;
   }
 
@@ -407,14 +404,12 @@ window.deleteArticle = function (id, event) {
   showToast('기사가 삭제되었습니다.', 'info');
 };
 
-/* ===== 기사 수정 처리 (관리자 전용) ===== */
+/* ===== 기사 수정 처리 (관리자 권한 검사) ===== */
 window.editArticle = function (id, event) {
   if (event) event.stopPropagation();
 
-  // 오직 관리자만 수정 가능
   if (!currentUser || currentUser.role !== 'admin') {
-    showToast('기사 수정 권한이 없습니다. (관리자 전용)', 'error');
-    if (!currentUser) openLoginModal();
+    showToast('관리자만 기사를 수정할 수 있습니다.', 'error');
     return;
   }
 
@@ -469,6 +464,7 @@ function setupEventListeners() {
       const loginId = document.getElementById('loginId').value;
       if (!loginId) return;
 
+      // 'admin' 또는 '관리자' 아이디로 로그인하면 관리자 권한(admin) 부여
       const role = (loginId.toLowerCase() === 'admin' || loginId === '관리자') ? 'admin' : 'user';
 
       currentUser = { name: loginId, role: role };
