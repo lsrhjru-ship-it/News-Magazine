@@ -196,6 +196,7 @@ window.openWriteModal = function (articleId = null) {
   const form = document.getElementById('articleForm');
 
   editingArticleId = articleId;
+  clearImagePreview(); // 기존 선택 이미지 미리보기 초기화
 
   if (articleId) {
     const article = articles.find(a => a.id === Number(articleId));
@@ -205,6 +206,17 @@ window.openWriteModal = function (articleId = null) {
       if (document.getElementById('artCategory')) document.getElementById('artCategory').value = article.category;
       if (document.getElementById('artAuthor')) document.getElementById('artAuthor').value = article.author;
       if (document.getElementById('artContent')) document.getElementById('artContent').value = article.content;
+
+      // 기존 기사에 이미지가 존재한다면 미리보기 표시
+      if (article.image) {
+        const previewImg = document.getElementById('imagePreview');
+        const uploadArea = document.getElementById('uploadArea');
+        const previewContainer = document.getElementById('imagePreviewContainer');
+
+        if (previewImg) previewImg.src = article.image;
+        if (uploadArea) uploadArea.style.display = 'none';
+        if (previewContainer) previewContainer.style.display = 'block';
+      }
     }
   } else {
     if (title) title.textContent = '✍️ 새 기사 작성';
@@ -220,6 +232,7 @@ window.openWriteModal = function (articleId = null) {
 window.closeWriteModal = function () {
   window.closeModal('writeModal');
   editingArticleId = null;
+  clearImagePreview();
 };
 
 // 상세보기 모달
@@ -451,16 +464,27 @@ function setupEventListeners() {
 
       if (fileInput && fileInput.files && fileInput.files[0]) {
         try {
+          // 이미지 축소 및 압축 후 Base64 변환
           finalImage = await readImageFile(fileInput.files[0]);
         } catch (err) {
           console.error('이미지 읽기 실패', err);
+          showToast('이미지 용량이 너무 크거나 읽기에 실패했습니다.', 'error');
+          return;
         }
       }
+
+      const isPreviewVisible = document.getElementById('imagePreviewContainer')?.style.display !== 'none';
 
       if (editingArticleId) {
         articles = articles.map(a => {
           if (a.id === editingArticleId) {
-            return { ...a, title, category, author, content, image: finalImage || a.image };
+            let updatedImage = a.image;
+            if (finalImage) {
+              updatedImage = finalImage;
+            } else if (!isPreviewVisible) {
+              updatedImage = ''; // 미리보기 제거 상태면 기존 이미지 삭제
+            }
+            return { ...a, title, category, author, content, image: updatedImage };
           }
           return a;
         });
@@ -480,21 +504,95 @@ function setupEventListeners() {
         showToast('새 기사가 등록되었습니다.', 'success');
       }
 
-      localStorage.setItem('articles', JSON.stringify(articles));
+      try {
+        localStorage.setItem('articles', JSON.stringify(articles));
+      } catch (storageErr) {
+        showToast('저장 용량이 부족합니다. 이미지를 변경해 보세요.', 'error');
+        return;
+      }
+
       renderArticles();
       closeWriteModal();
     });
   }
+
+  // 이미지 선택(change) 리스너 등록
+  setupImageInputListener();
 }
 
+/* ===== Image Handling & Preview ===== */
+
+// 파일 입력 선택 시 미리보기 표시
+function setupImageInputListener() {
+  const fileInput = document.getElementById('imageInput');
+  const uploadArea = document.getElementById('uploadArea');
+  const previewContainer = document.getElementById('imagePreviewContainer');
+  const previewImg = document.getElementById('imagePreview');
+
+  if (!fileInput) return;
+
+  fileInput.addEventListener('change', (e) => {
+    const file = e.target.files && e.target.files[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onload = (evt) => {
+        if (previewImg) previewImg.src = evt.target.result;
+        if (uploadArea) uploadArea.style.display = 'none';
+        if (previewContainer) previewContainer.style.display = 'block';
+      };
+      reader.readAsDataURL(file);
+    }
+  });
+}
+
+// 이미지 미리보기 초기화 (HTML ✕ 버튼 연동)
+window.clearImagePreview = function () {
+  const fileInput = document.getElementById('imageInput');
+  const uploadArea = document.getElementById('uploadArea');
+  const previewContainer = document.getElementById('imagePreviewContainer');
+  const previewImg = document.getElementById('imagePreview');
+
+  if (fileInput) fileInput.value = '';
+  if (previewImg) previewImg.src = '';
+  if (previewContainer) previewContainer.style.display = 'none';
+  if (uploadArea) uploadArea.style.display = 'block';
+};
+
+// Canvas를 활용하여 대용량 이미지를 자동으로 800px 축소 및 JPEG 70% 압축
 function readImageFile(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
-    reader.onload = () => resolve(reader.result);
+    reader.onload = (e) => {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        let width = img.width;
+        let height = img.height;
+        const maxWidth = 800; // 가로 최대 800px 축소
+
+        if (width > maxWidth) {
+          height = Math.round((height * maxWidth) / width);
+          width = maxWidth;
+        }
+
+        canvas.width = width;
+        canvas.height = height;
+
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, width, height);
+
+        // JPEG 70% 품질 압축 (localStorage 5MB 한계 대응)
+        resolve(canvas.toDataURL('image/jpeg', 0.7));
+      };
+      img.onerror = error => reject(error);
+      img.src = e.target.result;
+    };
     reader.onerror = error => reject(error);
     reader.readAsDataURL(file);
   });
 }
+
+/* ===== User Logout & Toast Messages ===== */
 
 window.logout = function () {
   currentUser = null;
