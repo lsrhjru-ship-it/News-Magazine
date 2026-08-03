@@ -1,205 +1,452 @@
-require('dotenv').config();
-const express = require('express');
-const cors = require('cors');
-const path = require('path');
-const Database = require('better-sqlite3');
-const bcrypt = require('bcryptjs');
-const jwt = require('jsonwebtoken');
+/* ===== App State ===== */
+const API_BASE = '/api';
+let token = localStorage.getItem('token') || null;
+let currentUser = JSON.parse(localStorage.getItem('currentUser')) || null;
+let articles = [];
+let currentCategory = '전체';
+let searchQuery = '';
+let editingArticleId = null;
 
-const app = express();
-const PORT = process.env.PORT || 3000;
-const JWT_SECRET = process.env.JWT_SECRET || 'secret';
+// 카테고리 데이터
+const categories = [
+  { name: '전체', icon: '🌐' },
+  { name: '날씨', icon: '🌤️' },
+  { name: '게임', icon: '🎮' },
+  { name: 'SNS', icon: '📱' },
+  { name: '스포츠', icon: '⚽' }
+];
 
-// SQLite 데이터베이스 연결
-const db = new Database(path.join(__dirname, 'blog.db'));
-
-// 테이블 생성
-db.exec(`
-  CREATE TABLE IF NOT EXISTS users (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    username TEXT UNIQUE NOT NULL,
-    password TEXT NOT NULL,
-    name TEXT NOT NULL,
-    role TEXT DEFAULT 'user'
-  );
-
-  CREATE TABLE IF NOT EXISTS articles (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    category TEXT NOT NULL,
-    title TEXT NOT NULL,
-    author TEXT NOT NULL,
-    date TEXT NOT NULL,
-    summary TEXT,
-    content TEXT NOT NULL
-  );
-`);
-
-// role 컬럼 존재 여부 확인 및 추가
-try {
-  db.exec(`ALTER TABLE users ADD COLUMN role TEXT DEFAULT 'user';`);
-} catch (e) {
-  // 이미 컬럼이 존재하면 무시
+function getCategoryIcon(catName) {
+  const found = categories.find(c => c.name === catName);
+  return found ? found.icon : '📰';
 }
 
-// 기본 관리자 계정 생성 및 admin 권한 부여
-const initAdmin = async () => {
-  const adminUser = process.env.ADMIN_USERNAME || 'lsrhjru';
-  const adminPass = process.env.ADMIN_PASSWORD || 'lsr37733*';
-  const adminName = process.env.ADMIN_NAME || '관리자';
+/* ===== DOM Loaded Initialization ===== */
+document.addEventListener('DOMContentLoaded', () => {
+  initTheme();
+  renderCategoryNav();
+  renderHeaderUserUI();
+  setupEventListeners();
 
-  const row = db.prepare('SELECT * FROM users WHERE username = ?').get(adminUser);
-  if (!row) {
-    const hashedPassword = await bcrypt.hash(adminPass, 10);
-    db.prepare('INSERT INTO users (username, password, name, role) VALUES (?, ?, ?, ?)').run(adminUser, hashedPassword, adminName, 'admin');
-    console.log('✅ 관리자 계정이 새로 생성되었습니다.');
+  // 서버에서 기사 목록 가져오기
+  fetchArticles();
+});
+
+/* ===== Theme Control (다크/라이트 모드) ===== */
+function initTheme() {
+  const savedTheme = localStorage.getItem('theme');
+  const themeBtn = document.getElementById('themeBtn');
+
+  if (savedTheme === 'light') {
+    document.body.classList.add('light-mode');
+    if (themeBtn) themeBtn.textContent = '🌙';
   } else {
-    db.prepare('UPDATE users SET role = ? WHERE username = ?').run('admin', adminUser);
-    console.log('✅ 관리자 권한이 보장되었습니다.');
+    document.body.classList.remove('light-mode');
+    if (themeBtn) themeBtn.textContent = '☀️';
+  }
+}
+
+window.toggleTheme = function () {
+  const themeBtn = document.getElementById('themeBtn');
+  const isLight = document.body.classList.toggle('light-mode');
+
+  if (isLight) {
+    localStorage.setItem('theme', 'light');
+    if (themeBtn) themeBtn.textContent = '🌙';
+    showToast('라이트 모드로 변경되었습니다.', 'info');
+  } else {
+    localStorage.setItem('theme', 'dark');
+    if (themeBtn) themeBtn.textContent = '☀️';
+    showToast('다크 모드로 변경되었습니다.', 'info');
   }
 };
-initAdmin();
 
-// 미들웨어 설정
-app.use(cors());
-app.use(express.json());
-app.use(express.static(path.join(__dirname)));
-
-// 1. JWT 토큰 유효성 검증 미들웨어
-const authenticateToken = (req, res, next) => {
-  const authHeader = req.headers['authorization'];
-  const token = authHeader && authHeader.split(' ')[1];
-
-  if (!token) return res.status(401).json({ message: '인증 토큰이 없습니다.' });
-
-  jwt.verify(token, JWT_SECRET, (err, user) => {
-    if (err) return res.status(403).json({ message: '유효하지 않거나 만료된 토큰입니다.' });
-    req.user = user;
-    next();
-  });
-};
-
-// 2. 🔑 관리자(Admin) 권한 검증 미들웨어
-const requireAdmin = (req, res, next) => {
-  const adminUsername = process.env.ADMIN_USERNAME || 'lsrhjru';
-
-  // 요청자의 username이 관리자 아이디이거나 role이 'admin'인 경우만 허용
-  const isAdmin = req.user && (
-    req.user.username === adminUsername || 
-    req.user.role === 'admin' || 
-    req.user.isAdmin === true
-  );
-
-  if (!isAdmin) {
-    return res.status(403).json({ message: '⛔ 관리자만 삭제 및 수정이 가능합니다.' });
-  }
-  next();
-};
-
-// --- API 라우트 ---
-
-// 1. 로그인
-app.post('/api/auth/login', async (req, res) => {
-  const { username, password } = req.body;
+/* ===== 서버 API 연동 (기사 가져오기) ===== */
+async function fetchArticles() {
   try {
-    const user = db.prepare('SELECT * FROM users WHERE username = ?').get(username);
-    if (!user) {
-      return res.status(401).json({ message: '아이디 또는 비밀번호가 올바르지 않습니다.' });
+    const res = await fetch(`${API_BASE}/articles`);
+    if (!res.ok) throw new Error('목록 조회 실패');
+    articles = await res.json();
+    renderArticles();
+  } catch (err) {
+    console.error('기사 목록 불러오기 오류:', err);
+  }
+}
+
+/* ===== Global Modal Control Functions ===== */
+window.closeModal = function (modalId) {
+  const modal = document.getElementById(modalId);
+  if (modal) {
+    modal.classList.remove('active', 'open', 'show');
+    modal.style.display = 'none';
+  }
+};
+
+window.openLoginModal = function () {
+  const modal = document.getElementById('loginModal');
+  const errDiv = document.getElementById('loginError');
+  if (errDiv) errDiv.style.display = 'none';
+  if (modal) {
+    modal.style.display = 'flex';
+    modal.classList.add('active');
+  }
+};
+
+window.closeLoginModal = function () {
+  window.closeModal('loginModal');
+};
+
+window.openWriteModal = function (articleId = null) {
+  if (!currentUser || !token) {
+    showToast('기사 작성/수정은 로그인 후 가능합니다.', 'error');
+    openLoginModal();
+    return;
+  }
+
+  const modal = document.getElementById('writeModal');
+  const title = document.getElementById('modalTitle');
+  const form = document.getElementById('articleForm');
+
+  editingArticleId = articleId;
+
+  if (articleId) {
+    const article = articles.find(a => a.id === Number(articleId));
+    if (article) {
+      if (title) title.textContent = '✏️ 기사 수정';
+      if (document.getElementById('artTitle')) document.getElementById('artTitle').value = article.title;
+      if (document.getElementById('artCategory')) document.getElementById('artCategory').value = article.category;
+      if (document.getElementById('artAuthor')) document.getElementById('artAuthor').value = article.author;
+      if (document.getElementById('artContent')) document.getElementById('artContent').value = article.content;
     }
-
-    const match = await bcrypt.compare(password, user.password);
-    if (!match) {
-      return res.status(401).json({ message: '아이디 또는 비밀번호가 올바르지 않습니다.' });
+  } else {
+    if (title) title.textContent = '✍️ 새 기사 작성';
+    if (form) form.reset();
+    if (document.getElementById('artAuthor') && currentUser) {
+      document.getElementById('artAuthor').value = currentUser.name || currentUser.username;
     }
+  }
 
-    const adminUsername = process.env.ADMIN_USERNAME || 'lsrhjru';
-    const isAdmin = (user.username === adminUsername || user.role === 'admin');
-    const role = isAdmin ? 'admin' : 'user';
+  if (modal) {
+    modal.style.display = 'flex';
+    modal.classList.add('active');
+  }
+};
 
-    const userData = {
-      id: user.id,
-      username: user.username,
-      name: user.name,
-      role: role,
-      isAdmin: isAdmin,
-      admin: isAdmin
-    };
+window.closeWriteModal = function () {
+  window.closeModal('writeModal');
+  editingArticleId = null;
+};
 
-    const token = jwt.sign(userData, JWT_SECRET, { expiresIn: '12h' });
+/* ===== 기사 상세보기 모달 ===== */
+window.openDetailModal = function (articleId) {
+  const article = articles.find(a => a.id === Number(articleId));
+  if (!article) return;
 
-    res.json({
-      token,
-      user: userData,
-      ...userData
+  const modal = document.getElementById('detailModal');
+  const detailContent = document.getElementById('detailContent');
+  const icon = getCategoryIcon(article.category);
+
+  if (detailContent) {
+    detailContent.innerHTML = `
+      <div style="padding: 20px;">
+        <div style="margin-bottom: 12px;">
+          <span style="background: rgba(255,255,255,0.08); border:1px solid var(--border-color); color: var(--accent-gold); padding: 4px 10px; border-radius: 20px; font-size: 0.85rem;">${icon} ${article.category}</span>
+        </div>
+        <h2 style="font-size: 1.5rem; margin-bottom: 12px; line-height: 1.4; font-weight: 700;">${article.title}</h2>
+        <div style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 20px; display: flex; gap: 8px; align-items: center; border-bottom: 1px solid var(--border-color); padding-bottom: 12px;">
+          <span>작성자: <strong style="color: var(--text-primary);">${article.author}</strong></span>
+          <span>•</span>
+          <span>${article.date}</span>
+        </div>
+        <div style="font-size: 1rem; color: var(--text-secondary); line-height: 1.8; white-space: pre-line; margin-bottom: 24px;">${article.content}</div>
+
+        <!-- 로그인되어 있다면 수정/삭제 버튼 노출 -->
+        ${currentUser ? `
+          <div style="display: flex; justify-content: flex-end; gap: 10px; border-top: 1px solid var(--border-color); padding-top: 16px;">
+            <button class="btn btn-ghost" onclick="editArticle(${article.id}, event)" style="font-size: 0.85rem; padding: 8px 14px;">✏️ 수정</button>
+            <button class="btn" onclick="deleteArticle(${article.id}, event)" style="background: rgba(232,85,85,0.15); color: #f87171; border: 1px solid rgba(232,85,85,0.3); font-size: 0.85rem; padding: 8px 14px;">🗑️ 삭제</button>
+          </div>
+        ` : ''}
+      </div>
+    `;
+  }
+
+  if (modal) {
+    modal.style.display = 'flex';
+    modal.classList.add('active');
+  }
+};
+
+/* ===== Category Navigation ===== */
+function renderCategoryNav() {
+  const catNav = document.getElementById('categoryNav');
+  if (!catNav) return;
+
+  catNav.innerHTML = categories.map(cat => `
+    <button 
+      class="cat-btn ${cat.name === currentCategory ? 'active' : ''}" 
+      data-category="${cat.name}"
+      onclick="setCategory('${cat.name}')"
+      style="padding: 8px 16px; margin-right: 8px; border-radius: 20px; border: 1px solid var(--border-color); background: transparent; color: var(--text-primary); cursor: pointer;"
+    >
+      <span>${cat.icon}</span> ${cat.name}
+    </button>
+  `).join('');
+}
+
+window.setCategory = function (category) {
+  currentCategory = category;
+  renderCategoryNav();
+  renderArticles();
+};
+
+/* ===== Articles Render ===== */
+function renderArticles() {
+  const grid = document.getElementById('articlesGrid');
+  if (!grid) return;
+
+  let filtered = articles;
+
+  if (currentCategory !== '전체') {
+    filtered = filtered.filter(a => a.category === currentCategory);
+  }
+
+  if (searchQuery.trim()) {
+    const q = searchQuery.toLowerCase();
+    filtered = filtered.filter(a =>
+      a.title.toLowerCase().includes(q) ||
+      a.content.toLowerCase().includes(q)
+    );
+  }
+
+  if (filtered.length === 0) {
+    grid.innerHTML = `
+      <div style="text-align:center; padding: 40px; width: 100%; grid-column: 1 / -1;">
+        <div style="font-size: 3rem;">📰</div>
+        <h3>등록된 기사가 없습니다</h3>
+      </div>
+    `;
+    return;
+  }
+
+  grid.innerHTML = filtered.map(article => {
+    const icon = getCategoryIcon(article.category);
+    return `
+      <div class="article-card" onclick="openDetailModal(${article.id})" style="cursor:pointer; border: 1px solid var(--border-color); border-radius: 12px; padding: 16px; background: var(--bg-card, #1e293b); margin-bottom: 16px;">
+        <div class="article-card-body">
+          <span style="font-size: 0.8rem; color: var(--accent-gold, #fbbf24);">${icon} ${article.category}</span>
+          <h3 style="margin: 8px 0; font-size: 1.1rem; color: var(--text-primary, #fff);">${article.title}</h3>
+          <p style="color: var(--text-secondary, #94a3b8); font-size: 0.9rem; margin-bottom: 12px;">${article.summary || article.content.substring(0, 70)}...</p>
+          <div style="display: flex; justify-content: space-between; align-items: center; font-size: 0.8rem; color: var(--text-muted, #64748b);">
+            <span>${article.author} • ${article.date}</span>
+            ${currentUser ? `
+              <div style="display: flex; gap: 6px;">
+                <button onclick="editArticle(${article.id}, event)" style="background:none; border:none; cursor:pointer;">✏️</button>
+                <button onclick="deleteArticle(${article.id}, event)" style="background:none; border:none; cursor:pointer;">🗑️</button>
+              </div>
+            ` : ''}
+          </div>
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+
+/* ===== 삭제 (서버 API 호출) ===== */
+window.deleteArticle = async function (id, event) {
+  if (event) event.stopPropagation();
+
+  if (!confirm('정말 이 기사를 삭제하시겠습니까?')) return;
+
+  try {
+    const res = await fetch(`${API_BASE}/articles/${id}`, {
+      method: 'DELETE',
+      headers: { 'Authorization': `Bearer ${token}` }
     });
-  } catch (error) {
-    res.status(500).json({ message: '서버 에러가 발생했습니다.' });
+
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.message);
+
+    showToast(data.message || '게시글이 삭제되었습니다.', 'info');
+    window.closeModal('detailModal');
+    fetchArticles();
+  } catch (err) {
+    showToast(err.message || '삭제 실패', 'error');
   }
-});
+};
 
-// 2. 게시글 목록 조회
-app.get('/api/articles', (req, res) => {
-  try {
-    const articles = db.prepare('SELECT * FROM articles ORDER BY id DESC').all();
-    res.json(articles);
-  } catch (error) {
-    res.status(500).json({ message: '게시글 목록을 불러오지 못했습니다.' });
+/* ===== 수정 ===== */
+window.editArticle = function (id, event) {
+  if (event) event.stopPropagation();
+  window.closeModal('detailModal');
+  window.openWriteModal(id);
+};
+
+/* ===== Header UI ===== */
+function renderHeaderUserUI() {
+  const userArea = document.getElementById('userArea');
+  const loginBtn = document.getElementById('loginBtn');
+  const writeBtn = document.getElementById('writeBtn');
+
+  if (currentUser) {
+    if (loginBtn) loginBtn.style.display = 'none';
+    if (userArea) {
+      userArea.style.display = 'flex';
+      const nameDisp = document.getElementById('userNameDisplay');
+      if (nameDisp) nameDisp.textContent = `${currentUser.name || currentUser.username}`;
+    }
+    if (writeBtn) writeBtn.style.display = 'inline-flex';
+  } else {
+    if (loginBtn) loginBtn.style.display = 'inline-flex';
+    if (userArea) userArea.style.display = 'none';
+    if (writeBtn) writeBtn.style.display = 'none';
   }
-});
+}
 
-// 3. 게시글 상세 조회
-app.get('/api/articles/:id', (req, res) => {
-  try {
-    const article = db.prepare('SELECT * FROM articles WHERE id = ?').get(req.params.id);
-    if (!article) return res.status(404).json({ message: '게시글을 찾을 수 없습니다.' });
-    res.json(article);
-  } catch (error) {
-    res.status(500).json({ message: '게시글을 불러오지 못했습니다.' });
+/* ===== Event Listeners ===== */
+function setupEventListeners() {
+  const searchInput = document.getElementById('searchInput');
+  if (searchInput) {
+    searchInput.addEventListener('input', (e) => {
+      searchQuery = e.target.value;
+      renderArticles();
+    });
   }
-});
 
-// 4. 게시글 작성 (로그인한 유저 누구나 가능)
-app.post('/api/articles', authenticateToken, (req, res) => {
-  const { category, title, content, summary } = req.body;
-  const author = req.user.name;
-  const date = new Date().toISOString().split('T')[0];
+  // 모달 배경 클릭 시 닫기
+  document.querySelectorAll('.modal-overlay').forEach(overlay => {
+    overlay.addEventListener('click', (e) => {
+      if (e.target === overlay) {
+        window.closeModal(overlay.id);
+      }
+    });
+  });
 
-  try {
-    const result = db.prepare(
-      'INSERT INTO articles (category, title, author, date, summary, content) VALUES (?, ?, ?, ?, ?, ?)'
-    ).run(category, title, author, date, summary || '', content);
+  // 로그인 폼 제출
+  const loginForm = document.getElementById('loginForm');
+  if (loginForm) {
+    loginForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const usernameInput = document.getElementById('loginId');
+      const passwordInput = document.getElementById('loginPw'); // index.html에 맞춰 loginPw로 지정
+      const errDiv = document.getElementById('loginError');
 
-    res.status(201).json({ id: result.lastInsertRowid, message: '게시글이 등록되었습니다.' });
-  } catch (error) {
-    res.status(500).json({ message: '게시글 등록에 실패했습니다.' });
+      const username = usernameInput ? usernameInput.value.trim() : '';
+      const password = passwordInput ? passwordInput.value : '';
+
+      if (!username || !password) {
+        if (errDiv) {
+          errDiv.textContent = '아이디와 비밀번호를 모두 입력해주세요.';
+          errDiv.style.display = 'block';
+        }
+        return;
+      }
+
+      try {
+        const res = await fetch(`${API_BASE}/auth/login`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username, password })
+        });
+
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.message);
+
+        token = data.token;
+        currentUser = data.user;
+
+        localStorage.setItem('token', token);
+        localStorage.setItem('currentUser', JSON.stringify(currentUser));
+
+        renderHeaderUserUI();
+        renderArticles();
+        closeLoginModal();
+
+        showToast(`${currentUser.name || currentUser.username}님 환영합니다!`, 'success');
+      } catch (err) {
+        if (errDiv) {
+          errDiv.textContent = err.message || '로그인 실패';
+          errDiv.style.display = 'block';
+        }
+      }
+    });
   }
-});
 
-// 5. 게시글 수정 (🔒 관리자 전용 : authenticateToken + requireAdmin)
-app.put('/api/articles/:id', authenticateToken, requireAdmin, (req, res) => {
-  const { category, title, content, summary } = req.body;
-  try {
-    const result = db.prepare(
-      'UPDATE articles SET category = ?, title = ?, content = ?, summary = ? WHERE id = ?'
-    ).run(category, title, content, summary || '', req.params.id);
+  // 기사 작성/수정 폼 제출
+  const articleForm = document.getElementById('articleForm');
+  if (articleForm) {
+    articleForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
 
-    if (result.changes === 0) return res.status(404).json({ message: '게시글을 찾을 수 없습니다.' });
-    res.json({ message: '게시글이 수정되었습니다.' });
-  } catch (error) {
-    res.status(500).json({ message: '게시글 수정에 실패했습니다.' });
+      if (!token) {
+        showToast('로그인이 필요합니다.', 'error');
+        return;
+      }
+
+      const title = document.getElementById('artTitle').value;
+      const category = document.getElementById('artCategory').value;
+      const content = document.getElementById('artContent').value;
+      const summary = content.substring(0, 100);
+
+      const method = editingArticleId ? 'PUT' : 'POST';
+      const url = editingArticleId ? `${API_BASE}/articles/${editingArticleId}` : `${API_BASE}/articles`;
+
+      try {
+        const res = await fetch(url, {
+          method,
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+          },
+          body: JSON.stringify({ category, title, content, summary })
+        });
+
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.message);
+
+        showToast(editingArticleId ? '기사가 수정되었습니다.' : '새 기사가 등록되었습니다.', 'success');
+        fetchArticles();
+        closeWriteModal();
+      } catch (err) {
+        showToast(err.message || '저장에 실패했습니다.', 'error');
+      }
+    });
   }
-});
+}
 
-// 6. 게시글 삭제 (🔒 관리자 전용 : authenticateToken + requireAdmin)
-app.delete('/api/articles/:id', authenticateToken, requireAdmin, (req, res) => {
-  try {
-    const result = db.prepare('DELETE FROM articles WHERE id = ?').run(req.params.id);
-    if (result.changes === 0) return res.status(404).json({ message: '게시글을 찾을 수 없습니다.' });
-    res.json({ message: '게시글이 삭제되었습니다.' });
-  } catch (error) {
-    res.status(500).json({ message: '게시글 삭제에 실패했습니다.' });
-  }
-});
+/* ===== Logout ===== */
+window.logout = function () {
+  token = null;
+  currentUser = null;
+  localStorage.removeItem('token');
+  localStorage.removeItem('currentUser');
+  renderHeaderUserUI();
+  renderArticles();
+  showToast('로그아웃 되었습니다.', 'info');
+};
 
-app.listen(PORT, () => {
-  console.log(`🚀 서버가 실행되었습니다: http://localhost:${PORT}`);
-});
+/* ===== 이미지 미리보기 초기화 ===== */
+window.clearImagePreview = function () {
+  const input = document.getElementById('imageInput');
+  const previewContainer = document.getElementById('imagePreviewContainer');
+  const uploadArea = document.getElementById('uploadArea');
+
+  if (input) input.value = '';
+  if (previewContainer) previewContainer.style.display = 'none';
+  if (uploadArea) uploadArea.style.display = 'block';
+};
+
+/* ===== Toast Message ===== */
+function showToast(message, type = 'info') {
+  let container = document.getElementById('toastContainer');
+  if (!container) return;
+
+  const toast = document.createElement('div');
+  toast.style.cssText = "padding: 12px 20px; margin-top: 10px; background: #1e293b; color: #fff; border-radius: 8px; font-size: 0.9rem; border: 1px solid rgba(255,255,255,0.1);";
+  toast.innerHTML = `<span>${message}</span>`;
+  container.appendChild(toast);
+
+  setTimeout(() => {
+    toast.remove();
+  }, 3000);
+}
