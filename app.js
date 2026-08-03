@@ -1,9 +1,6 @@
 // ==========================================
 // 🔗 백엔드 서버 주소 설정
 // ==========================================
-// 예: 로컬 서버 사용 시 -> 'http://localhost:3000'
-// 예: 외부/클라우드 서버 사용 시 -> 'https://your-domain.com'
-// 예: Express에서 HTML/JS를 같이 호스팅하는 경우 -> '' (빈 문자열)
 const API_BASE_URL = 'https://se-eaib.onrender.com';
 
 let articles = [];
@@ -12,6 +9,13 @@ let articles = [];
 document.addEventListener('DOMContentLoaded', () => {
   checkAuth();
   fetchArticles();
+
+  // 폼 이벤트 바인딩
+  const loginForm = document.getElementById('loginForm');
+  if (loginForm) loginForm.addEventListener('submit', handleLogin);
+
+  const articleForm = document.getElementById('articleForm');
+  if (articleForm) articleForm.addEventListener('submit', saveArticle);
 });
 
 // --- 인증 관리 ---
@@ -20,16 +24,20 @@ function checkAuth() {
   const user = JSON.parse(localStorage.getItem('user') || 'null');
 
   const loginBtn = document.getElementById('loginBtn');
-  const logoutBtn = document.getElementById('logoutBtn');
+  const userArea = document.getElementById('userArea');
+  const userNameDisplay = document.getElementById('userNameDisplay');
   const writeBtn = document.getElementById('writeBtn');
 
   if (token && user) {
     if (loginBtn) loginBtn.style.display = 'none';
-    if (logoutBtn) logoutBtn.style.display = 'inline-block';
-    if (writeBtn) writeBtn.style.display = 'inline-block';
+    if (userArea) {
+      userArea.style.display = 'flex';
+      if (userNameDisplay) userNameDisplay.textContent = user.username || user.name || '관리자';
+    }
+    if (writeBtn) writeBtn.style.display = 'inline-flex';
   } else {
-    if (loginBtn) loginBtn.style.display = 'inline-block';
-    if (logoutBtn) logoutBtn.style.display = 'none';
+    if (loginBtn) loginBtn.style.display = 'inline-flex';
+    if (userArea) userArea.style.display = 'none';
     if (writeBtn) writeBtn.style.display = 'none';
   }
 }
@@ -39,6 +47,7 @@ async function handleLogin(e) {
   e.preventDefault();
   const idInput = document.getElementById('loginId').value;
   const pwInput = document.getElementById('loginPw').value;
+  const loginError = document.getElementById('loginError');
 
   try {
     const res = await fetch(`${API_BASE_URL}/api/auth/login`, {
@@ -52,11 +61,16 @@ async function handleLogin(e) {
       localStorage.setItem('token', data.token);
       localStorage.setItem('user', JSON.stringify(data.user));
       alert('로그인되었습니다.');
-      closeModal('loginModal');
+      closeLoginModal();
       checkAuth();
       fetchArticles();
     } else {
-      alert(data.message || '로그인에 실패했습니다.');
+      if (loginError) {
+        loginError.style.display = 'block';
+        loginError.textContent = data.message || '로그인에 실패했습니다.';
+      } else {
+        alert(data.message || '로그인에 실패했습니다.');
+      }
     }
   } catch (err) {
     alert('서버와 통신하는 중 오류가 발생했습니다.');
@@ -64,7 +78,7 @@ async function handleLogin(e) {
 }
 
 // 로그아웃 처리
-function handleLogout() {
+function logout() {
   localStorage.removeItem('token');
   localStorage.removeItem('user');
   alert('로그아웃되었습니다.');
@@ -87,11 +101,11 @@ async function fetchArticles() {
 
 // 게시글 렌더링
 function renderArticles(list) {
-  const container = document.getElementById('articleList');
+  const container = document.getElementById('articlesGrid');
   if (!container) return;
 
   container.innerHTML = '';
-  if (list.length === 0) {
+  if (!Array.isArray(list) || list.length === 0) {
     container.innerHTML = '<p class="no-data">등록된 게시글이 없습니다.</p>';
     return;
   }
@@ -104,14 +118,14 @@ function renderArticles(list) {
     card.innerHTML = `
       <span class="category-tag">${escapeHtml(article.category)}</span>
       <h3>${escapeHtml(article.title)}</h3>
-      <p class="summary">${escapeHtml(article.summary || article.content.substring(0, 100))}</p>
+      <p class="summary">${escapeHtml(article.summary || (article.content ? article.content.substring(0, 100) : ''))}</p>
       <div class="meta">
-        <span>${escapeHtml(article.author)}</span> | <span>${article.date}</span>
+        <span>${escapeHtml(article.author || '익명')}</span> | <span>${article.created_at || article.date || ''}</span>
       </div>
       ${token ? `
-        <div class="card-actions">
-          <button onclick="editArticle(${article.id})">수정</button>
-          <button onclick="deleteArticle(${article.id})">삭제</button>
+        <div class="card-actions" style="margin-top:10px;display:flex;gap:8px">
+          <button class="btn btn-ghost" onclick="editArticle(${article.id})">수정</button>
+          <button class="btn btn-ghost" onclick="deleteArticle(${article.id})">삭제</button>
         </div>
       ` : ''}
     `;
@@ -125,12 +139,14 @@ async function saveArticle(e) {
   const token = localStorage.getItem('token');
   if (!token) return alert('로그인이 필요합니다.');
 
-  const id = document.getElementById('articleId').value;
-  const category = document.getElementById('articleCategory').value;
-  const title = document.getElementById('articleTitle').value;
-  const content = document.getElementById('articleContent').value;
+  const idElement = document.getElementById('articleId');
+  const id = idElement ? idElement.value : '';
+  const category = document.getElementById('artCategory').value;
+  const title = document.getElementById('artTitle').value;
+  const author = document.getElementById('artAuthor').value;
+  const content = document.getElementById('artContent').value;
 
-  const payload = { category, title, content };
+  const payload = { category, title, author, content };
   const method = id ? 'PUT' : 'POST';
   const url = id ? `${API_BASE_URL}/api/articles/${id}` : `${API_BASE_URL}/api/articles`;
 
@@ -146,8 +162,8 @@ async function saveArticle(e) {
 
     const data = await res.json();
     if (res.ok) {
-      alert(data.message);
-      closeModal('writeModal');
+      alert(data.message || '성공적으로 저장되었습니다.');
+      closeWriteModal();
       fetchArticles();
     } else {
       alert(data.message || '저장에 실패했습니다.');
@@ -185,25 +201,71 @@ function editArticle(id) {
   const article = articles.find(a => a.id === id);
   if (!article) return;
 
-  document.getElementById('articleId').value = article.id;
-  document.getElementById('articleCategory').value = article.category;
-  document.getElementById('articleTitle').value = article.title;
-  document.getElementById('articleContent').value = article.content;
+  let idElement = document.getElementById('articleId');
+  if (!idElement) {
+    idElement = document.createElement('input');
+    idElement.type = 'hidden';
+    idElement.id = 'articleId';
+    document.getElementById('articleForm').appendChild(idElement);
+  }
+  
+  idElement.value = article.id;
+  document.getElementById('artCategory').value = article.category;
+  document.getElementById('artTitle').value = article.title;
+  if (document.getElementById('artAuthor')) {
+    document.getElementById('artAuthor').value = article.author || '';
+  }
+  document.getElementById('artContent').value = article.content;
 
+  openWriteModal();
+}
+
+// --- 모달 제어 함수 ---
+function openLoginModal() {
+  openModal('loginModal');
+}
+
+function closeLoginModal() {
+  closeModal('loginModal');
+  const loginError = document.getElementById('loginError');
+  if (loginError) loginError.style.display = 'none';
+}
+
+function openWriteModal() {
   openModal('writeModal');
 }
 
-// UI 모달 제어
+function closeWriteModal() {
+  closeModal('writeModal');
+  const articleForm = document.getElementById('articleForm');
+  if (articleForm) articleForm.reset();
+  const idElement = document.getElementById('articleId');
+  if (idElement) idElement.value = '';
+}
+
 function openModal(modalId) {
-  document.getElementById(modalId).style.display = 'block';
+  const modal = document.getElementById(modalId);
+  if (modal) {
+    modal.classList.add('active');
+    modal.style.display = 'flex';
+  }
 }
 
 function closeModal(modalId) {
-  document.getElementById(modalId).style.display = 'none';
+  const modal = document.getElementById(modalId);
+  if (modal) {
+    modal.classList.remove('active');
+    modal.style.display = 'none';
+  }
 }
 
 // XSS 방지용 HTML 문자열 이스케이프
 function escapeHtml(str) {
   if (!str) return '';
-  return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  return String(str)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
 }
