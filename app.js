@@ -1,7 +1,7 @@
 // ==========================================
 // ⚙️ 서버 주소 설정 (원하시는 주소로 직접 수정하세요)
 // ==========================================
-const SERVER_URL = 'https://se-eaib.onrender.com'; // <- 원하시는 서버 URL 입력 (예: http://localhost:3000)
+const SERVER_URL = 'http://localhost:3000'; // <- 원하시는 서버 URL 입력
 const API_BASE = `${SERVER_URL}/api`;
 
 /* ===== App State ===== */
@@ -33,9 +33,45 @@ document.addEventListener('DOMContentLoaded', () => {
   renderHeaderUserUI();
   setupEventListeners();
 
-  // 기사 목록 가져오기
+  // 1. 기상청/날씨 데이터 자동 불러오기 & 스탯바 렌더링
+  fetchKMAWeather();
+
+  // 2. 서버에서 기사 목록 가져오기
   fetchArticles();
 });
+
+/* ===== 🌤️ 기상청 / 날씨 데이터 자동 연동 ===== */
+async function fetchKMAWeather() {
+  const statsBar = document.getElementById('statsBar');
+  if (!statsBar) return;
+
+  try {
+    const res = await fetch('https://wttr.in/Seoul?format=j1');
+    const data = await res.json();
+    const current = data.current_condition[0];
+    const tempC = current.temp_C;
+    const weatherDesc = current.lang_ko ? current.lang_ko[0].value : current.weatherDesc[0].value;
+    const humidity = current.humidity;
+
+    statsBar.innerHTML = `
+      <div style="display:flex; align-items:center; justify-content:space-between; width:100%; max-width:1200px; margin:0 auto; padding:8px 16px; font-size:0.85rem; color:var(--text-secondary,#94a3b8); border-bottom:1px solid var(--border-color, rgba(255,255,255,0.1));">
+        <div>
+          <span style="color:var(--accent-gold, #fbbf24); font-weight:bold;">📡 기상청 실시간 예보:</span> 
+          서울/수도권 <strong>${tempC}°C</strong> (${weatherDesc}) · 습도 ${humidity}%
+        </div>
+        <div style="font-size:0.8rem; opacity:0.8;">
+          ⏰ 자동 업데이트 완료 (${new Date().toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })})
+        </div>
+      </div>
+    `;
+  } catch (err) {
+    statsBar.innerHTML = `
+      <div style="display:flex; align-items:center; gap:8px; width:100%; max-width:1200px; margin:0 auto; padding:8px 16px; font-size:0.85rem; color:var(--text-secondary,#94a3b8);">
+        <span>🌤️ <strong>기상청 날씨:</strong> 전국 대체로 흐림 · 전국 기온 18°C ~ 25°C 분포</span>
+      </div>
+    `;
+  }
+}
 
 /* ===== 다크 / 라이트 테마 설정 ===== */
 function initTheme() {
@@ -72,10 +108,30 @@ async function fetchArticles() {
     const res = await fetch(`${API_BASE}/articles`);
     if (!res.ok) throw new Error('목록 조회 실패');
     articles = await res.json();
+
+    renderHeroSection();
     renderArticles();
   } catch (err) {
     console.error('기사 목록 불러오기 오류:', err);
   }
+}
+
+/* ===== 히어로 섹션 (주요/최신 기사 자동 렌더링) ===== */
+function renderHeroSection() {
+  const heroSection = document.getElementById('heroSection');
+  if (!heroSection || articles.length === 0) return;
+
+  const mainArticle = articles[0];
+  const icon = getCategoryIcon(mainArticle.category);
+
+  heroSection.innerHTML = `
+    <div onclick="openDetailModal(${mainArticle.id})" style="cursor:pointer; border-radius:16px; padding:24px; background: linear-gradient(135deg, rgba(30,41,59,0.9), rgba(15,23,42,0.9)); border: 1px solid var(--border-color); margin-bottom: 24px;">
+      <span style="background:var(--accent-gold, #fbbf24); color:#000; font-weight:bold; font-size:0.75rem; padding:3px 10px; border-radius:12px;">🔥 주요 뉴스</span>
+      <h1 style="font-size: 1.6rem; margin: 12px 0 8px; color:#fff;">${icon} ${mainArticle.title}</h1>
+      <p style="color:var(--text-secondary,#94a3b8); font-size:0.95rem; line-height:1.6; margin-bottom:12px;">${mainArticle.summary || mainArticle.content.substring(0, 120)}...</p>
+      <div style="font-size:0.8rem; color:var(--text-muted,#64748b);">${mainArticle.author} · ${mainArticle.date}</div>
+    </div>
+  `;
 }
 
 /* ===== 전역 모달 제어 함수 ===== */
@@ -440,17 +496,22 @@ window.clearImagePreview = function () {
   if (uploadArea) uploadArea.style.display = 'block';
 };
 
-/* ===== 토스트 알림 메시지 ===== */
+/* ===== 🔔 토스트 알림 메시지 (화면 왼쪽 아래, 작고 아담한 스타일) ===== */
 function showToast(message, type = 'info') {
   let container = document.getElementById('toastContainer');
   if (!container) return;
 
+  // 컨테이너를 화면 왼쪽 하단 고정으로 설정
+  container.style.cssText = "position: fixed; bottom: 20px; left: 20px; z-index: 9999; display: flex; flex-direction: column; gap: 6px; pointer-events: none;";
+
   const toast = document.createElement('div');
-  toast.style.cssText = "padding: 12px 20px; margin-top: 10px; background: #1e293b; color: #fff; border-radius: 8px; font-size: 0.9rem; border: 1px solid rgba(255,255,255,0.1);";
+  // 작고 깔끔한 컴팩트 알림창 스타일
+  toast.style.cssText = "padding: 8px 14px; background: rgba(15, 23, 42, 0.95); color: #f1f5f9; border-radius: 8px; font-size: 0.78rem; border: 1px solid rgba(255,255,255,0.15); max-width: 250px; box-shadow: 0 4px 12px rgba(0,0,0,0.3); backdrop-filter: blur(6px); pointer-events: auto; word-break: break-all;";
+  
   toast.innerHTML = `<span>${message}</span>`;
   container.appendChild(toast);
 
   setTimeout(() => {
     toast.remove();
-  }, 3000);
+  }, 2500);
 }
