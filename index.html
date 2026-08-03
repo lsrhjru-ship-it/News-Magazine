@@ -8,8 +8,7 @@
   <meta name="description" content="날씨, 게임, SNS, 스포츠 등 다양한 분야의 뉴스를 확인하세요. 누구나 기사를 작성하고 공유할 수 있는 뉴스 플랫폼입니다.">
   <meta name="keywords" content="뉴스, 기사, 최신뉴스, 뉴스매거진, 날씨, 게임, SNS, 스포츠">
   <link rel="stylesheet" href="style.css">
-  <link rel="icon"
-    href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📰</text></svg>">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📰</text></svg>">
 </head>
 
 <body>
@@ -32,12 +31,12 @@
         </div>
         <button id="themeBtn" class="btn-icon" onclick="toggleTheme()" title="테마 변경" aria-label="테마 변경">☀️</button>
 
-        <!-- 로그인 전: 로그인 버튼 -->
+        <!-- 로그인 전 -->
         <button id="loginBtn" class="btn btn-ghost" onclick="openLoginModal()" aria-label="로그인">
           🔐 <span class="btn-text">로그인</span>
         </button>
 
-        <!-- 로그인 후: 사용자 영역 -->
+        <!-- 로그인 후 -->
         <div id="userArea" style="display:none;align-items:center;gap:10px">
           <div class="user-badge">
             <span class="user-avatar">👤</span>
@@ -48,7 +47,7 @@
           </button>
         </div>
 
-        <!-- 기사 작성 (로그인 시만 표시) -->
+        <!-- 기사 작성 버튼 -->
         <button class="btn btn-gold" onclick="openWriteModal()" id="writeBtn" style="display:none" aria-label="기사 작성">
           <span>✍️</span>
           <span class="btn-text">기사 작성</span>
@@ -56,29 +55,21 @@
       </div>
     </div>
 
-    <!-- Category Navigation -->
+    <!-- Category Nav -->
     <nav class="category-nav" aria-label="카테고리 탐색">
-      <div class="category-nav-inner" id="categoryNav">
-        <!-- Rendered by JS -->
-      </div>
+      <div class="category-nav-inner" id="categoryNav"></div>
     </nav>
   </header>
 
   <!-- Stats Bar -->
-  <div class="stats-bar" id="statsBar" role="status" aria-live="polite">
-    <!-- Rendered by JS -->
-  </div>
+  <div class="stats-bar" id="statsBar" role="status" aria-live="polite"></div>
 
   <!-- ===== MAIN ===== -->
   <main class="main">
-
-    <!-- Search Status -->
     <div id="searchStatus" style="display:none;margin-bottom:16px;font-size:14px;color:var(--text-muted);"></div>
 
     <!-- Hero Section -->
-    <section id="heroSection" class="hero-section" aria-label="주요 기사">
-      <!-- Rendered by JS -->
-    </section>
+    <section id="heroSection" class="hero-section" aria-label="주요 기사"></section>
 
     <!-- Articles Grid -->
     <section aria-label="기사 목록">
@@ -88,11 +79,8 @@
           + 새 기사
         </button>
       </div>
-      <div class="articles-grid" id="articlesGrid">
-        <!-- Rendered by JS -->
-      </div>
+      <div class="articles-grid" id="articlesGrid"></div>
     </section>
-
   </main>
 
   <!-- ===== FOOTER ===== -->
@@ -101,7 +89,7 @@
     <p class="footer-text">세상과 이야기를 나누는 공간 · © 2026 뉴스매거진</p>
   </footer>
 
-  <!-- ===== Toast Container ===== -->
+  <!-- Toast Container -->
   <div class="toast-container" id="toastContainer" aria-live="assertive" aria-atomic="true"></div>
 
   <!-- ===== WRITE MODAL ===== -->
@@ -141,8 +129,7 @@
           </div>
 
           <div class="form-group">
-            <label class="form-label">대표 이미지 <span style="color:var(--text-muted);font-weight:400">(선택, 최대
-                5MB)</span></label>
+            <label class="form-label">대표 이미지 <span style="color:var(--text-muted);font-weight:400">(선택, 최대 5MB)</span></label>
 
             <!-- Upload Area -->
             <div class="image-upload-area" id="uploadArea">
@@ -156,8 +143,7 @@
             <div id="imagePreviewContainer" style="display:none">
               <div class="image-preview-container">
                 <img id="imagePreview" class="image-preview" alt="미리보기">
-                <button type="button" class="image-preview-remove" onclick="clearImagePreview()"
-                  aria-label="이미지 제거">✕</button>
+                <button type="button" class="image-preview-remove" onclick="clearImagePreview()" aria-label="이미지 제거">✕</button>
               </div>
             </div>
           </div>
@@ -178,9 +164,7 @@
         <span style="font-size:14px;color:var(--text-muted)">📄 기사 상세보기</span>
         <button class="modal-close" onclick="closeModal('detailModal')" aria-label="닫기">✕</button>
       </div>
-      <div id="detailContent">
-        <!-- Rendered by JS -->
-      </div>
+      <div id="detailContent"></div>
     </div>
   </div>
 
@@ -202,12 +186,9 @@
           </div>
           <div class="form-group">
             <label class="form-label" for="loginPw">비밀번호</label>
-            <input type="password" id="loginPw" class="form-input" placeholder="비밀번호 입력" autocomplete="current-password"
-              required>
+            <input type="password" id="loginPw" class="form-input" placeholder="비밀번호 입력" autocomplete="current-password" required>
           </div>
-          <div id="loginError"
-            style="display:none;color:var(--accent-red);font-size:13px;margin-bottom:16px;padding:10px 14px;background:rgba(232,85,85,0.1);border-radius:8px;border:1px solid rgba(232,85,85,0.2)">
-          </div>
+          <div id="loginError" style="display:none;color:var(--accent-red);font-size:13px;margin-bottom:16px;padding:10px 14px;background:rgba(232,85,85,0.1);border-radius:8px;border:1px solid rgba(232,85,85,0.2)"></div>
           <div class="form-footer" style="padding-top:0;border-top:none;margin-top:0">
             <button type="button" class="btn btn-ghost" onclick="closeLoginModal()">취소</button>
             <button type="submit" class="btn btn-primary">🔓 로그인</button>
@@ -217,7 +198,6 @@
     </div>
   </div>
 
-  <!-- 스크립트 연결 시 defer 추가 -->
   <script src="app.js" defer></script>
 </body>
 
