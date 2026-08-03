@@ -1,26 +1,18 @@
-// ==========================================
-// ⚙️ 서버 주소 설정 (Render 배포 및 로컬 자동 감지)
-// ==========================================
-const SERVER_URL = window.location.origin.includes('onrender.com') 
-  ? window.location.origin 
-  : 'https://news-magazine-1.onrender.com'; // <- 로컬 테스트 시 해당 주소 사용
-const API_BASE = `${SERVER_URL}/api`;
-
 /* ===== App State ===== */
-let token = localStorage.getItem('token') || null;
+let articles = JSON.parse(localStorage.getItem('articles')) || [];
 let currentUser = JSON.parse(localStorage.getItem('currentUser')) || null;
-let articles = [];
 let currentCategory = '전체';
 let searchQuery = '';
 let editingArticleId = null;
 
-// 카테고리 설정
+// 카테고리 데이터
 const categories = [
   { name: '전체', icon: '🌐' },
   { name: '날씨', icon: '🌤️' },
   { name: '게임', icon: '🎮' },
   { name: 'SNS', icon: '📱' },
-  { name: '스포츠', icon: '⚽' }
+  { name: '스포츠', icon: '⚽' },
+  { name: '기상청', icon: '☀️' }
 ];
 
 function getCategoryIcon(catName) {
@@ -28,54 +20,21 @@ function getCategoryIcon(catName) {
   return found ? found.icon : '📰';
 }
 
-/* ===== DOM 로드 시 초기화 ===== */
+/* ===== DOM Loaded Initialization ===== */
 document.addEventListener('DOMContentLoaded', () => {
   initTheme();
   renderCategoryNav();
   renderHeaderUserUI();
   setupEventListeners();
 
-  // 1. 기상청/날씨 데이터 자동 불러오기
-  fetchKMAWeather();
+  // 1. 기사 목록을 화면에 즉시 렌더링
+  renderArticles();
 
-  // 2. 서버에서 기사 목록 가져오기
-  fetchArticles();
+  // 2. 날씨 API 및 GPS 수신은 백그라운드에서 비동기로 수행
+  fetchWeatherAndAutoCreateNews();
 });
 
-/* ===== 🌤️ 기상청 / 날씨 데이터 자동 연동 ===== */
-async function fetchKMAWeather() {
-  const statsBar = document.getElementById('statsBar');
-  if (!statsBar) return;
-
-  try {
-    const res = await fetch('https://wttr.in/Seoul?format=j1');
-    const data = await res.json();
-    const current = data.current_condition[0];
-    const tempC = current.temp_C;
-    const weatherDesc = current.lang_ko ? current.lang_ko[0].value : current.weatherDesc[0].value;
-    const humidity = current.humidity;
-
-    statsBar.innerHTML = `
-      <div style="display:flex; align-items:center; justify-content:space-between; width:100%; max-width:1200px; margin:0 auto; padding:8px 16px; font-size:0.85rem; color:var(--text-secondary,#94a3b8); border-bottom:1px solid var(--border-color, rgba(255,255,255,0.1));">
-        <div>
-          <span style="color:var(--accent-gold, #fbbf24); font-weight:bold;">📡 기상청 실시간 예보:</span> 
-          서울/수도권 <strong>${tempC}°C</strong> (${weatherDesc}) · 습도 ${humidity}%
-        </div>
-        <div style="font-size:0.8rem; opacity:0.8;">
-          ⏰ 자동 업데이트 완료 (${new Date().toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })})
-        </div>
-      </div>
-    `;
-  } catch (err) {
-    statsBar.innerHTML = `
-      <div style="display:flex; align-items:center; gap:8px; width:100%; max-width:1200px; margin:0 auto; padding:8px 16px; font-size:0.85rem; color:var(--text-secondary,#94a3b8);">
-        <span>🌤️ <strong>기상청 날씨:</strong> 전국 대체로 흐림 · 전국 기온 18°C ~ 25°C 분포</span>
-      </div>
-    `;
-  }
-}
-
-/* ===== 다크 / 라이트 테마 설정 ===== */
+/* ===== Theme Control (다크/라이트 모드) ===== */
 function initTheme() {
   const savedTheme = localStorage.getItem('theme');
   const themeBtn = document.getElementById('themeBtn');
@@ -104,51 +63,111 @@ window.toggleTheme = function () {
   }
 };
 
-/* ===== 서버 응답 파싱 유틸리티 (JSON Parsing 안전 처리) ===== */
-async function parseResponse(res) {
-  const text = await res.text();
-  try {
-    return JSON.parse(text);
-  } catch (e) {
-    return { message: text || `서버 오류가 발생했습니다. (상태 코드: ${res.status})` };
+/* ===== Weather & Location Integration ===== */
+async function fetchWeatherAndAutoCreateNews() {
+  let lat = 37.5665;
+  let lon = 126.9780;
+  let regionName = "내 지역";
+
+  if (navigator.geolocation) {
+    try {
+      const position = await new Promise((resolve, reject) => {
+        navigator.geolocation.getCurrentPosition(resolve, reject, { timeout: 1500 });
+      });
+      lat = position.coords.latitude;
+      lon = position.coords.longitude;
+    } catch (e) {
+      regionName = "전국";
+    }
   }
-}
 
-/* ===== 서버 API 연동 (기사 목록 가져오기) ===== */
-async function fetchArticles() {
   try {
-    const res = await fetch(`${API_BASE}/articles`);
-    if (!res.ok) throw new Error('목록 조회 실패');
-    articles = await parseResponse(res);
+    const weatherRes = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current_weather=true`);
+    const weatherData = await weatherRes.json();
 
-    if (Array.isArray(articles)) {
-      renderHeroSection();
-      renderArticles();
+    if (regionName === "내 지역") {
+      try {
+        const geoRes = await fetch(`https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${lat}&longitude=${lon}&localityLanguage=ko`);
+        const geoData = await geoRes.json();
+        regionName = geoData.city || geoData.principalSubdivision || geoData.locality || "내 지역";
+      } catch (e) {
+        regionName = "내 지역";
+      }
+    }
+
+    if (weatherData && weatherData.current_weather) {
+      const weather = weatherData.current_weather;
+      const weatherText = getWeatherStatusText(weather.weathercode);
+      const temp = weather.temperature;
+      const wind = weather.windspeed;
+      const todayStr = new Date().toISOString().split('T')[0];
+
+      renderWeatherWidget(regionName, temp, weatherText, wind);
+
+      const hasTodayWeatherNews = articles.some(a => a.category === '기상청' && a.date === todayStr && a.isAuto);
+
+      if (!hasTodayWeatherNews) {
+        const weatherArticle = {
+          id: Date.now(),
+          title: `[기상청 속보] ${regionName} 현재 기온 ${temp}°C, '${weatherText}'`,
+          category: '기상청',
+          excerpt: `기상청 발표: ${regionName} 지역 현재 풍속 ${wind}km/h입니다.`,
+          content: `기상청에서 발표한 ${regionName} 지역 실시간 날씨 데이터입니다.\n\n- 현재 기온: ${temp}°C\n- 날씨 상태: ${weatherText}\n- 풍속: ${wind} km/h\n\n최신 기상 정보가 실시간 업데이트됩니다.`,
+          author: '기상청 자동시스템',
+          date: todayStr,
+          views: 1,
+          isAuto: true,
+          image: 'https://images.unsplash.com/photo-1592210454359-9043f067919b?w=800&q=80'
+        };
+
+        articles.unshift(weatherArticle);
+        localStorage.setItem('articles', JSON.stringify(articles));
+        renderArticles();
+      }
     }
   } catch (err) {
-    console.error('기사 목록 불러오기 오류:', err);
+    console.error('날씨 데이터 불러오기 실패:', err);
   }
 }
 
-/* ===== 히어로 섹션 (주요/최신 기사 자동 렌더링) ===== */
-function renderHeroSection() {
-  const heroSection = document.getElementById('heroSection');
-  if (!heroSection || !Array.isArray(articles) || articles.length === 0) return;
-
-  const mainArticle = articles[0];
-  const icon = getCategoryIcon(mainArticle.category);
-
-  heroSection.innerHTML = `
-    <div onclick="openDetailModal(${mainArticle.id})" style="cursor:pointer; border-radius:16px; padding:24px; background: linear-gradient(135deg, rgba(30,41,59,0.9), rgba(15,23,42,0.9)); border: 1px solid var(--border-color); margin-bottom: 24px;">
-      <span style="background:var(--accent-gold, #fbbf24); color:#000; font-weight:bold; font-size:0.75rem; padding:3px 10px; border-radius:12px;">🔥 주요 뉴스</span>
-      <h1 style="font-size: 1.6rem; margin: 12px 0 8px; color:#fff;">${icon} ${mainArticle.title}</h1>
-      <p style="color:var(--text-secondary,#94a3b8); font-size:0.95rem; line-height:1.6; margin-bottom:12px;">${mainArticle.summary || mainArticle.content.substring(0, 120)}...</p>
-      <div style="font-size:0.8rem; color:var(--text-muted,#64748b);">${mainArticle.author} · ${mainArticle.date}</div>
-    </div>
-  `;
+function getWeatherStatusText(code) {
+  if (code === 0) return '맑음 ☀️';
+  if (code <= 3) return '구름 조금/흐림 ⛅';
+  if (code <= 48) return '안개 🌫️';
+  if (code <= 67) return '비 🌧️';
+  if (code <= 77) return '눈 ❄️';
+  return '소나기/강우 🌧️';
 }
 
-/* ===== 전역 모달 제어 함수 ===== */
+function renderWeatherWidget(region, temp, text, wind) {
+  let widget = document.getElementById('weatherWidget');
+  if (!widget) {
+    const grid = document.getElementById('articlesGrid');
+    if (grid) {
+      widget = document.createElement('div');
+      widget.id = 'weatherWidget';
+      grid.parentNode.insertBefore(widget, grid);
+    }
+  }
+
+  if (widget) {
+    widget.innerHTML = `
+      <div style="background: var(--bg-card); color: var(--text-primary); padding: 18px 24px; border-radius: 12px; margin: 20px 0; display: flex; align-items: center; justify-content: space-between; border: 1px solid var(--border-color);">
+        <div>
+          <span style="font-size: 0.85rem; color: #fbbf24; font-weight: bold;">☀️ 실시간 기상청 날씨 정보 (${region})</span>
+          <h3 style="margin: 4px 0 0 0; font-size: 1.3rem;">현재 기온 ${temp}°C (${text})</h3>
+        </div>
+        <div style="text-align: right; font-size: 0.9rem; color: var(--text-secondary);">
+          풍속: ${wind} km/h<br>
+          <span style="font-size: 0.75rem; color: #34d399;">● GPS 위치 수신됨</span>
+        </div>
+      </div>
+    `;
+  }
+}
+
+/* ===== Global Modal Control Functions ===== */
+
 window.closeModal = function (modalId) {
   const modal = document.getElementById(modalId);
   if (modal) {
@@ -159,8 +178,6 @@ window.closeModal = function (modalId) {
 
 window.openLoginModal = function () {
   const modal = document.getElementById('loginModal');
-  const errDiv = document.getElementById('loginError');
-  if (errDiv) errDiv.style.display = 'none';
   if (modal) {
     modal.style.display = 'flex';
     modal.classList.add('active');
@@ -172,7 +189,7 @@ window.closeLoginModal = function () {
 };
 
 window.openWriteModal = function (articleId = null) {
-  if (!currentUser || !token) {
+  if (!currentUser) {
     showToast('기사 작성/수정은 로그인 후 가능합니다.', 'error');
     openLoginModal();
     return;
@@ -183,7 +200,7 @@ window.openWriteModal = function (articleId = null) {
   const form = document.getElementById('articleForm');
 
   editingArticleId = articleId;
-  window.clearImagePreview();
+  clearImagePreview();
 
   if (articleId) {
     const article = articles.find(a => a.id === Number(articleId));
@@ -193,13 +210,20 @@ window.openWriteModal = function (articleId = null) {
       if (document.getElementById('artCategory')) document.getElementById('artCategory').value = article.category;
       if (document.getElementById('artAuthor')) document.getElementById('artAuthor').value = article.author;
       if (document.getElementById('artContent')) document.getElementById('artContent').value = article.content;
+
+      if (article.image) {
+        const previewImg = document.getElementById('imagePreview');
+        const uploadArea = document.getElementById('uploadArea');
+        const previewContainer = document.getElementById('imagePreviewContainer');
+
+        if (previewImg) previewImg.src = article.image;
+        if (uploadArea) uploadArea.style.display = 'none';
+        if (previewContainer) previewContainer.style.display = 'block';
+      }
     }
   } else {
     if (title) title.textContent = '✍️ 새 기사 작성';
     if (form) form.reset();
-    if (document.getElementById('artAuthor') && currentUser) {
-      document.getElementById('artAuthor').value = currentUser.name || currentUser.username;
-    }
   }
 
   if (modal) {
@@ -211,12 +235,17 @@ window.openWriteModal = function (articleId = null) {
 window.closeWriteModal = function () {
   window.closeModal('writeModal');
   editingArticleId = null;
+  clearImagePreview();
 };
 
-/* ===== 기사 상세 보기 모달 ===== */
+/* ===== 기사 상세보기 모달 ===== */
 window.openDetailModal = function (articleId) {
   const article = articles.find(a => a.id === Number(articleId));
   if (!article) return;
+
+  article.views = (article.views || 0) + 1;
+  localStorage.setItem('articles', JSON.stringify(articles));
+  renderArticles();
 
   const modal = document.getElementById('detailModal');
   const detailContent = document.getElementById('detailContent');
@@ -224,25 +253,24 @@ window.openDetailModal = function (articleId) {
 
   if (detailContent) {
     detailContent.innerHTML = `
-      <div style="padding: 20px;">
-        <div style="margin-bottom: 12px;">
-          <span style="background: rgba(255,255,255,0.08); border:1px solid var(--border-color); color: var(--accent-gold); padding: 4px 10px; border-radius: 20px; font-size: 0.85rem;">${icon} ${article.category}</span>
-        </div>
-        ${article.imageUrl ? `<img src="${article.imageUrl}" style="width:100%; max-height:300px; object-fit:cover; border-radius:12px; margin-bottom:16px;" />` : ''}
-        <h2 style="font-size: 1.5rem; margin-bottom: 12px; line-height: 1.4; font-weight: 700;">${article.title}</h2>
-        <div style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 20px; display: flex; gap: 8px; align-items: center; border-bottom: 1px solid var(--border-color); padding-bottom: 12px;">
-          <span>작성자: <strong style="color: var(--text-primary);">${article.author}</strong></span>
-          <span>•</span>
-          <span>${article.date}</span>
-        </div>
-        <div style="font-size: 1rem; color: var(--text-secondary); line-height: 1.8; white-space: pre-line; margin-bottom: 24px;">${article.content}</div>
+      ${article.image ? `<img src="${article.image}" style="width: 100%; max-height: 320px; object-fit: cover; border-radius: 12px; margin-bottom: 20px;" alt="${article.title}" loading="lazy">` : ''}
+      <div style="margin-bottom: 12px;">
+        <span class="badge" style="background: rgba(255,255,255,0.08); border:1px solid var(--border-color); color: var(--accent-gold); padding: 4px 10px; border-radius: 20px; font-size: 0.85rem;">${icon} ${article.category}</span>
+      </div>
+      <h2 style="font-size: 1.5rem; margin-bottom: 12px; line-height: 1.4; font-weight: 700;">${article.title}</h2>
+      <div style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 20px; display: flex; gap: 8px; align-items: center; border-bottom: 1px solid var(--border-color); padding-bottom: 12px;">
+        <span>작성자: <strong style="color: var(--text-primary);">${article.author}</strong></span>
+        <span>•</span>
+        <span>${article.date}</span>
+        <span>•</span>
+        <span>조회수 ${article.views}</span>
+      </div>
+      <div style="font-size: 1rem; color: var(--text-secondary); line-height: 1.8; white-space: pre-line; margin-bottom: 24px;">${article.content}</div>
 
-        ${currentUser ? `
-          <div style="display: flex; justify-content: flex-end; gap: 10px; border-top: 1px solid var(--border-color); padding-top: 16px;">
-            <button class="btn btn-ghost" onclick="editArticle(${article.id}, event)" style="font-size: 0.85rem; padding: 8px 14px;">✏️ 수정</button>
-            <button class="btn" onclick="deleteArticle(${article.id}, event)" style="background: rgba(232,85,85,0.15); color: #f87171; border: 1px solid rgba(232,85,85,0.3); font-size: 0.85rem; padding: 8px 14px;">🗑️ 삭제</button>
-          </div>
-        ` : ''}
+      <!-- 상세보기 하단 수정 & 삭제 버튼 -->
+      <div style="display: flex; justify-content: flex-end; gap: 10px; border-top: 1px solid var(--border-color); padding-top: 16px;">
+        <button class="btn btn-ghost" onclick="editArticle(${article.id}, event)" style="font-size: 0.85rem; padding: 8px 14px;">✏️ 기사 수정</button>
+        <button class="btn" onclick="deleteArticle(${article.id}, event)" style="background: rgba(232,85,85,0.15); color: #f87171; border: 1px solid rgba(232,85,85,0.3); font-size: 0.85rem; padding: 8px 14px;">🗑️ 기사 삭제</button>
       </div>
     `;
   }
@@ -253,7 +281,11 @@ window.openDetailModal = function (articleId) {
   }
 };
 
-/* ===== 카테고리 네비게이션 ===== */
+window.closeDetailModal = function () {
+  window.closeModal('detailModal');
+};
+
+/* ===== Category Navigation & Render ===== */
 function renderCategoryNav() {
   const catNav = document.getElementById('categoryNav');
   if (!catNav) return;
@@ -263,25 +295,26 @@ function renderCategoryNav() {
       class="cat-btn ${cat.name === currentCategory ? 'active' : ''}" 
       data-category="${cat.name}"
       onclick="setCategory('${cat.name}')"
-      style="padding: 8px 16px; margin-right: 8px; border-radius: 20px; border: 1px solid var(--border-color); background: transparent; color: var(--text-primary); cursor: pointer;"
     >
-      <span>${cat.icon}</span> ${cat.name}
+      <span class="cat-icon">${cat.icon}</span> ${cat.name}
     </button>
   `).join('');
 }
 
 window.setCategory = function (category) {
   currentCategory = category;
-  renderCategoryNav();
+  document.querySelectorAll('.cat-btn').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.category === category);
+  });
   renderArticles();
 };
 
-/* ===== 기사 목록 렌더링 ===== */
+/* ===== Articles Render & Actions ===== */
 function renderArticles() {
   const grid = document.getElementById('articlesGrid');
   if (!grid) return;
 
-  let filtered = Array.isArray(articles) ? articles : [];
+  let filtered = articles;
 
   if (currentCategory !== '전체') {
     filtered = filtered.filter(a => a.category === currentCategory);
@@ -297,9 +330,10 @@ function renderArticles() {
 
   if (filtered.length === 0) {
     grid.innerHTML = `
-      <div style="text-align:center; padding: 40px; width: 100%; grid-column: 1 / -1;">
+      <div class="empty-state" style="text-align:center; padding: 40px; width: 100%;">
         <div style="font-size: 3rem;">📰</div>
         <h3>등록된 기사가 없습니다</h3>
+        <button class="btn btn-gold" onclick="openWriteModal()" style="margin-top:12px;">첫 기사 작성하기</button>
       </div>
     `;
     return;
@@ -308,20 +342,25 @@ function renderArticles() {
   grid.innerHTML = filtered.map(article => {
     const icon = getCategoryIcon(article.category);
     return `
-      <div class="article-card" onclick="openDetailModal(${article.id})" style="cursor:pointer; border: 1px solid var(--border-color); border-radius: 12px; padding: 16px; background: var(--bg-card, #1e293b); margin-bottom: 16px; overflow:hidden;">
-        ${article.imageUrl ? `<img src="${article.imageUrl}" style="width:100%; height:160px; object-fit:cover; border-radius:8px; margin-bottom:12px;" />` : ''}
-        <div class="article-card-body">
-          <span style="font-size: 0.8rem; color: var(--accent-gold, #fbbf24);">${icon} ${article.category}</span>
-          <h3 style="margin: 8px 0; font-size: 1.1rem; color: var(--text-primary, #fff);">${article.title}</h3>
-          <p style="color: var(--text-secondary, #94a3b8); font-size: 0.9rem; margin-bottom: 12px;">${article.summary || article.content.substring(0, 70)}...</p>
-          <div style="display: flex; justify-content: space-between; align-items: center; font-size: 0.8rem; color: var(--text-muted, #64748b);">
-            <span>${article.author} • ${article.date}</span>
-            ${currentUser ? `
-              <div style="display: flex; gap: 6px;">
-                <button onclick="editArticle(${article.id}, event)" style="background:none; border:none; cursor:pointer;">✏️</button>
-                <button onclick="deleteArticle(${article.id}, event)" style="background:none; border:none; cursor:pointer;">🗑️</button>
-              </div>
-            ` : ''}
+      <div class="article-card" onclick="openDetailModal(${article.id})" style="cursor:pointer;">
+        <div class="article-card-img-container">
+          ${article.image
+        ? `<img src="${article.image}" class="article-card-img" alt="${article.title}" loading="lazy">`
+        : `<div class="article-card-img-placeholder" style="font-size:2rem; text-align:center; padding: 30px;">${icon}</div>`
+      }
+        </div>
+        <div class="article-card-body" style="padding: 16px;">
+          <span class="badge badge-${article.category}">${icon} ${article.category}</span>
+          <h3 class="article-card-title" style="margin: 10px 0; font-size: 1.1rem;">${article.title}</h3>
+          <p class="article-card-excerpt" style="color:var(--text-secondary); font-size:0.9rem;">${article.excerpt || article.content.substring(0, 60)}...</p>
+          <div class="article-card-meta" style="margin-top:12px; display:flex; justify-content:space-between; align-items:center; font-size:0.8rem; color:var(--text-muted);">
+            <div>
+              <span>${article.author}</span> • <span>${article.date}</span>
+            </div>
+            <div style="display:flex; gap:6px;">
+              <button class="action-btn edit" onclick="editArticle(${article.id}, event)" title="수정" style="padding: 3px 7px; border-radius: 4px; border: 1px solid var(--border-color); background: var(--bg-card); cursor: pointer;">✏️</button>
+              <button class="action-btn delete" onclick="deleteArticle(${article.id}, event)" title="삭제" style="padding: 3px 7px; border-radius: 4px; border: 1px solid var(--border-color); background: var(--bg-card); cursor: pointer;">🗑️</button>
+            </div>
           </div>
         </div>
       </div>
@@ -329,48 +368,77 @@ function renderArticles() {
   }).join('');
 }
 
-/* ===== 기사 삭제 요청 ===== */
-window.deleteArticle = async function (id, event) {
-  if (event) event.stopPropagation();
+/* ===== 기사 삭제 처리 ===== */
+window.deleteArticle = function (id, event) {
+  if (event) event.stopPropagation(); // 카드 클릭 모달 오픈 방지
+
+  if (!currentUser) {
+    showToast('기사 삭제는 로그인 후 가능합니다.', 'error');
+    openLoginModal();
+    return;
+  }
+
+  const article = articles.find(a => a.id === Number(id));
+  if (!article) return;
+
+  // 작성자 본인이거나 관리자(admin)인지 확인
+  const isAuthor = article.author === currentUser.name;
+  const isAdmin = currentUser.role === 'admin';
+
+  if (!isAuthor && !isAdmin) {
+    showToast('본인이 작성한 기사만 삭제할 수 있습니다.', 'error');
+    return;
+  }
 
   if (!confirm('정말 이 기사를 삭제하시겠습니까?')) return;
 
-  try {
-    const res = await fetch(`${API_BASE}/articles/${id}`, {
-      method: 'DELETE',
-      headers: { 'Authorization': `Bearer ${token}` }
-    });
+  articles = articles.filter(a => a.id !== Number(id));
+  localStorage.setItem('articles', JSON.stringify(articles));
 
-    const data = await parseResponse(res);
-    if (!res.ok) throw new Error(data.message);
-
-    showToast(data.message || '게시글이 삭제되었습니다.', 'info');
-    window.closeModal('detailModal');
-    fetchArticles();
-  } catch (err) {
-    showToast(err.message || '삭제 실패', 'error');
-  }
+  closeDetailModal(); // 상세보기 창이 열려있다면 닫기
+  renderArticles();
+  showToast('기사가 삭제되었습니다.', 'info');
 };
 
-/* ===== 기사 수정 ===== */
+/* ===== 기사 수정 처리 ===== */
 window.editArticle = function (id, event) {
-  if (event) event.stopPropagation();
-  window.closeModal('detailModal');
+  if (event) event.stopPropagation(); // 카드 클릭 모달 오픈 방지
+
+  if (!currentUser) {
+    showToast('기사 수정은 로그인 후 가능합니다.', 'error');
+    openLoginModal();
+    return;
+  }
+
+  const article = articles.find(a => a.id === Number(id));
+  if (!article) return;
+
+  // 작성자 본인이거나 관리자(admin)인지 확인
+  const isAuthor = article.author === currentUser.name;
+  const isAdmin = currentUser.role === 'admin';
+
+  if (!isAuthor && !isAdmin) {
+    showToast('본인이 작성한 기사만 수정할 수 있습니다.', 'error');
+    return;
+  }
+
+  closeDetailModal(); // 상세보기 창이 열려있다면 닫기
   window.openWriteModal(id);
 };
 
-/* ===== 헤더 사용자 영역 UI 렌더링 ===== */
+/* ===== Header & UI Handling ===== */
 function renderHeaderUserUI() {
   const userArea = document.getElementById('userArea');
   const loginBtn = document.getElementById('loginBtn');
   const writeBtn = document.getElementById('writeBtn');
 
+  const isAdmin = currentUser && currentUser.role === 'admin';
+
   if (currentUser) {
     if (loginBtn) loginBtn.style.display = 'none';
     if (userArea) {
       userArea.style.display = 'flex';
-      const nameDisp = document.getElementById('userNameDisplay');
-      if (nameDisp) nameDisp.textContent = `${currentUser.name || currentUser.username}`;
+      document.getElementById('userNameDisplay').textContent = `${currentUser.name} ${isAdmin ? '(관리자)' : ''}`;
     }
     if (writeBtn) writeBtn.style.display = 'inline-flex';
   } else {
@@ -380,17 +448,7 @@ function renderHeaderUserUI() {
   }
 }
 
-/* ===== 파일 읽기 헬퍼 함수 (Base64 변환) ===== */
-function readFileAsBase64(file) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(reader.result);
-    reader.onerror = error => reject(error);
-    reader.readAsDataURL(file);
-  });
-}
-
-/* ===== 이벤트 리스너 바인딩 ===== */
+/* ===== Event Listeners Setup ===== */
 function setupEventListeners() {
   const searchInput = document.getElementById('searchInput');
   if (searchInput) {
@@ -400,7 +458,6 @@ function setupEventListeners() {
     });
   }
 
-  // 모달 배경 바깥 클릭 시 닫기
   document.querySelectorAll('.modal-overlay').forEach(overlay => {
     overlay.addEventListener('click', (e) => {
       if (e.target === overlay) {
@@ -409,141 +466,189 @@ function setupEventListeners() {
     });
   });
 
-  // 로그인 폼 제출 처리
   const loginForm = document.getElementById('loginForm');
   if (loginForm) {
-    loginForm.addEventListener('submit', async (e) => {
+    loginForm.addEventListener('submit', (e) => {
       e.preventDefault();
-      const usernameInput = document.getElementById('loginId');
-      const passwordInput = document.getElementById('loginPw');
-      const errDiv = document.getElementById('loginError');
+      const loginId = document.getElementById('loginId').value;
+      if (!loginId) return;
 
-      const username = usernameInput ? usernameInput.value.trim() : '';
-      const password = passwordInput ? passwordInput.value : '';
+      const role = (loginId.toLowerCase() === 'admin' || loginId === '관리자') ? 'admin' : 'user';
 
-      if (!username || !password) {
-        if (errDiv) {
-          errDiv.textContent = '아이디와 비밀번호를 모두 입력해주세요.';
-          errDiv.style.display = 'block';
-        }
-        return;
-      }
+      currentUser = { name: loginId, role: role };
+      localStorage.setItem('currentUser', JSON.stringify(currentUser));
 
-      try {
-        const res = await fetch(`${API_BASE}/auth/login`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ username, password })
-        });
+      renderHeaderUserUI();
+      renderArticles();
+      closeLoginModal();
 
-        const data = await parseResponse(res);
-        if (!res.ok) throw new Error(data.message);
-
-        token = data.token;
-        currentUser = data.user;
-
-        localStorage.setItem('token', token);
-        localStorage.setItem('currentUser', JSON.stringify(currentUser));
-
-        renderHeaderUserUI();
-        renderArticles();
-        closeLoginModal();
-
-        showToast(`${currentUser.name || currentUser.username}님 환영합니다!`, 'success');
-      } catch (err) {
-        if (errDiv) {
-          errDiv.textContent = err.message || '로그인 실패';
-          errDiv.style.display = 'block';
-        }
-      }
+      showToast(`${loginId}님 환영합니다! ${role === 'admin' ? '(관리자 권한)' : ''}`, 'success');
     });
   }
 
-  // 기사 작성/수정 폼 제출 처리 (이미지 업로드 대응)
   const articleForm = document.getElementById('articleForm');
   if (articleForm) {
     articleForm.addEventListener('submit', async (e) => {
       e.preventDefault();
 
-      if (!token) {
+      if (!currentUser) {
         showToast('로그인이 필요합니다.', 'error');
         return;
       }
 
       const title = document.getElementById('artTitle').value;
       const category = document.getElementById('artCategory').value;
+      const author = document.getElementById('artAuthor').value;
       const content = document.getElementById('artContent').value;
-      const summary = content.substring(0, 100);
+      const fileInput = document.getElementById('imageInput');
 
-      // 이미지 파일 읽기
-      const imageInput = document.getElementById('imageInput');
-      let imageUrl = null;
-      if (imageInput && imageInput.files && imageInput.files[0]) {
+      let finalImage = '';
+
+      if (fileInput && fileInput.files && fileInput.files[0]) {
         try {
-          imageUrl = await readFileAsBase64(imageInput.files[0]);
-        } catch (imgErr) {
-          showToast('이미지 읽기에 실패했습니다.', 'error');
+          finalImage = await readImageFile(fileInput.files[0]);
+        } catch (err) {
+          console.error('이미지 읽기 실패', err);
+          showToast('이미지 용량이 너무 크거나 읽기에 실패했습니다.', 'error');
+          return;
         }
       }
 
-      const method = editingArticleId ? 'PUT' : 'POST';
-      const url = editingArticleId ? `${API_BASE}/articles/${editingArticleId}` : `${API_BASE}/articles`;
+      const isPreviewVisible = document.getElementById('imagePreviewContainer')?.style.display !== 'none';
+
+      if (editingArticleId) {
+        articles = articles.map(a => {
+          if (a.id === editingArticleId) {
+            let updatedImage = a.image;
+            if (finalImage) {
+              updatedImage = finalImage;
+            } else if (!isPreviewVisible) {
+              updatedImage = '';
+            }
+            return { ...a, title, category, author, content, image: updatedImage };
+          }
+          return a;
+        });
+        showToast('기사가 수정되었습니다.', 'success');
+      } else {
+        const newArticle = {
+          id: Date.now(),
+          title,
+          category,
+          content,
+          image: finalImage,
+          author: author || currentUser.name,
+          date: new Date().toISOString().split('T')[0],
+          views: 0
+        };
+        articles.unshift(newArticle);
+        showToast('새 기사가 등록되었습니다.', 'success');
+      }
 
       try {
-        const res = await fetch(url, {
-          method,
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${token}`
-          },
-          body: JSON.stringify({ category, title, content, summary, imageUrl })
-        });
-
-        const data = await parseResponse(res);
-        if (!res.ok) throw new Error(data.message);
-
-        showToast(editingArticleId ? '기사가 수정되었습니다.' : '새 기사가 등록되었습니다.', 'success');
-        fetchArticles();
-        closeWriteModal();
-      } catch (err) {
-        showToast(err.message || '저장에 실패했습니다.', 'error');
+        localStorage.setItem('articles', JSON.stringify(articles));
+      } catch (storageErr) {
+        showToast('저장 용량이 부족합니다. 이미지를 변경해 보세요.', 'error');
+        return;
       }
+
+      renderArticles();
+      closeWriteModal();
     });
   }
+
+  setupImageInputListener();
 }
 
-/* ===== 로그아웃 ===== */
+/* ===== Image Handling & Preview ===== */
+
+function setupImageInputListener() {
+  const fileInput = document.getElementById('imageInput');
+  const uploadArea = document.getElementById('uploadArea');
+  const previewContainer = document.getElementById('imagePreviewContainer');
+  const previewImg = document.getElementById('imagePreview');
+
+  if (!fileInput) return;
+
+  fileInput.addEventListener('change', (e) => {
+    const file = e.target.files && e.target.files[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onload = (evt) => {
+        if (previewImg) previewImg.src = evt.target.result;
+        if (uploadArea) uploadArea.style.display = 'none';
+        if (previewContainer) previewContainer.style.display = 'block';
+      };
+      reader.readAsDataURL(file);
+    }
+  });
+}
+
+window.clearImagePreview = function () {
+  const fileInput = document.getElementById('imageInput');
+  const uploadArea = document.getElementById('uploadArea');
+  const previewContainer = document.getElementById('imagePreviewContainer');
+  const previewImg = document.getElementById('imagePreview');
+
+  if (fileInput) fileInput.value = '';
+  if (previewImg) previewImg.src = '';
+  if (previewContainer) previewContainer.style.display = 'none';
+  if (uploadArea) uploadArea.style.display = 'block';
+};
+
+function readImageFile(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        let width = img.width;
+        let height = img.height;
+        const maxWidth = 800;
+
+        if (width > maxWidth) {
+          height = Math.round((height * maxWidth) / width);
+          width = maxWidth;
+        }
+
+        canvas.width = width;
+        canvas.height = height;
+
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, width, height);
+
+        resolve(canvas.toDataURL('image/jpeg', 0.7));
+      };
+      img.onerror = error => reject(error);
+      img.src = e.target.result;
+    };
+    reader.onerror = error => reject(error);
+    reader.readAsDataURL(file);
+  });
+}
+
+/* ===== User Logout & Toast Messages ===== */
+
 window.logout = function () {
-  token = null;
   currentUser = null;
-  localStorage.removeItem('token');
   localStorage.removeItem('currentUser');
   renderHeaderUserUI();
   renderArticles();
   showToast('로그아웃 되었습니다.', 'info');
 };
 
-/* ===== 이미지 미리보기 초기화 ===== */
-window.clearImagePreview = function () {
-  const input = document.getElementById('imageInput');
-  const previewContainer = document.getElementById('imagePreviewContainer');
-  const uploadArea = document.getElementById('uploadArea');
-
-  if (input) input.value = '';
-  if (previewContainer) previewContainer.style.display = 'none';
-  if (uploadArea) uploadArea.style.display = 'block';
-};
-
-/* ===== 🔔 토스트 알림 메시지 (화면 왼쪽 아래, 작고 아담한 스타일) ===== */
 function showToast(message, type = 'info') {
   let container = document.getElementById('toastContainer');
-  if (!container) return;
-
-  container.style.cssText = "position: fixed; bottom: 20px; left: 20px; z-index: 9999; display: flex; flex-direction: column; gap: 6px; pointer-events: none;";
+  if (!container) {
+    container = document.createElement('div');
+    container.id = 'toastContainer';
+    document.body.appendChild(container);
+  }
 
   const toast = document.createElement('div');
-  toast.style.cssText = "padding: 8px 14px; background: rgba(15, 23, 42, 0.95); color: #f1f5f9; border-radius: 8px; font-size: 0.78rem; border: 1px solid rgba(255,255,255,0.15); max-width: 280px; box-shadow: 0 4px 12px rgba(0,0,0,0.3); backdrop-filter: blur(6px); pointer-events: auto; word-break: break-all;";
-
+  toast.className = `toast ${type}`;
+  toast.style.cssText = "padding: 12px 20px; margin-top: 10px; background: #1e293b; color: #fff; border-radius: 8px; font-size: 0.9rem; position: fixed; bottom: 20px; right: 20px; z-index: 9999; border: 1px solid rgba(255,255,255,0.1);";
   toast.innerHTML = `<span>${message}</span>`;
   container.appendChild(toast);
 
