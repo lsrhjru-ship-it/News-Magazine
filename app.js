@@ -6,7 +6,7 @@ let searchQuery = '';
 let editingArticleId = null;
 let currentWeather = null;
 
-// 카테고리 & 이모지 데이터 정의 (IT과학->게임, 경제->SNS, 사회->기상청, 문화 삭제)
+// 카테고리 데이터 (IT과학->게임, 경제->SNS, 사회->기상청, 문화 삭제)
 const categories = [
   { name: '전체', icon: '🌐' },
   { name: '게임', icon: '🎮' },
@@ -26,41 +26,64 @@ document.addEventListener('DOMContentLoaded', async () => {
   renderHeaderUserUI();
   setupEventListeners();
   
-  // 날씨 데이터 및 기상청 자동 뉴스 생성 실행
+  // 실시간 사용자 위치 감지 및 날씨/뉴스 렌더링
   await fetchWeatherAndAutoCreateNews();
   renderArticles();
 });
 
-/* ===== Weather & Weather News Integration ===== */
+/* ===== Weather & Location Integration ===== */
 async function fetchWeatherAndAutoCreateNews() {
-  try {
-    // 대한민국 울산/서울 기준 기상청 데이터 요청 (Open-Meteo Free API)
-    const res = await fetch('https://api.open-meteo.com/v1/forecast?latitude=35.5383&longitude=129.3114&current_weather=true');
-    const data = await res.json();
+  let lat = 37.5665;
+  let lon = 126.9780;
+  let regionName = "내 지역";
 
-    if (data && data.current_weather) {
-      const weather = data.current_weather;
+  if (navigator.geolocation) {
+    try {
+      const position = await new Promise((resolve, reject) => {
+        navigator.geolocation.getCurrentPosition(resolve, reject, { timeout: 4000 });
+      });
+      lat = position.coords.latitude;
+      lon = position.coords.longitude;
+    } catch (e) {
+      console.log('위치 권한 거부 또는 감지 실패. 기본 위치로 동작합니다.');
+      regionName = "서울/전국";
+    }
+  }
+
+  try {
+    const weatherRes = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current_weather=true`);
+    const weatherData = await weatherRes.json();
+
+    if (regionName === "내 지역") {
+      try {
+        const geoRes = await fetch(`https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${lat}&longitude=${lon}&localityLanguage=ko`);
+        const geoData = await geoRes.json();
+        regionName = geoData.city || geoData.principalSubdivision || geoData.locality || "내 지역";
+      } catch (e) {
+        regionName = "내 지역";
+      }
+    }
+
+    if (weatherData && weatherData.current_weather) {
+      const weather = weatherData.current_weather;
       currentWeather = weather;
 
-      // 날씨 상태 매핑
       const weatherText = getWeatherStatusText(weather.weathercode);
       const temp = weather.temperature;
       const wind = weather.windspeed;
       const todayStr = new Date().toISOString().split('T')[0];
 
-      // 사이트 중간 날씨 위젯 렌더링
-      renderWeatherWidget(temp, weatherText, wind);
+      renderWeatherWidget(regionName, temp, weatherText, wind);
 
-      // 오늘 날짜 기상청 자동 속보 기사가 없으면 자동으로 등록
       const hasTodayWeatherNews = articles.some(a => a.category === '기상청' && a.date === todayStr && a.isAuto);
 
       if (!hasTodayWeatherNews) {
         const weatherArticle = {
           id: Date.now(),
-          title: `[기상청 속보] 오늘 현재 기온 ${temp}°C, 날씨 상태는 '${weatherText}'입니다.`,
+          title: `[기상청 속보] ${regionName} 현재 기온 ${temp}°C, '${weatherText}'`,
           category: '기상청',
-          excerpt: `기상청 발표: 현재 풍속 ${wind}km/h이며, 야외 활동 시 참고 바랍니다.`,
-          content: `기상청에서 발표한 실시간 날씨 데이터입니다.\n\n- 현재 기온: ${temp}°C\n- 날씨 상태: ${weatherText}\n- 풍속: ${wind} km/h\n\n지속적으로 최신 기상 정보를 업데이트해 드립니다.`,
+          excerpt: `기상청 발표: ${regionName} 지역 현재 풍속 ${wind}km/h입니다.`,
+          content: `기상청에서 발표한 ${regionName} 지역 실시간 날씨 데이터입니다.\n\n- 현재 기온: ${temp}°C\n- 날씨 상태: ${weatherText}\n- 풍속: ${wind} km/h\n\n최신 기상 정보가 수시로 업데이트됩니다.`,
           author: '기상청 자동시스템',
           date: todayStr,
           views: 1,
@@ -73,7 +96,7 @@ async function fetchWeatherAndAutoCreateNews() {
       }
     }
   } catch (err) {
-    console.error('날씨 불러오기 실패:', err);
+    console.error('날씨 데이터 불러오기 실패:', err);
   }
 }
 
@@ -86,10 +109,9 @@ function getWeatherStatusText(code) {
   return '소나기/강우 🌧️';
 }
 
-function renderWeatherWidget(temp, text, wind) {
+function renderWeatherWidget(region, temp, text, wind) {
   let widget = document.getElementById('weatherWidget');
   if (!widget) {
-    // 위젯이 HTML에 없을 경우 articlesGrid 상단에 자동 생성
     const grid = document.getElementById('articlesGrid');
     if (grid) {
       widget = document.createElement('div');
@@ -102,12 +124,12 @@ function renderWeatherWidget(temp, text, wind) {
     widget.innerHTML = `
       <div style="background: linear-gradient(135deg, #1e293b, #0f172a); color: #fff; padding: 18px 24px; border-radius: 12px; margin: 20px 0; display: flex; align-items: center; justify-content: space-between; border: 1px solid rgba(255,255,255,0.1);">
         <div>
-          <span style="font-size: 0.85rem; color: #fbbf24; font-weight: bold;">☀️ 실시간 기상청 날씨 정보</span>
-          <h3 style="margin: 4px 0 0 0; font-size: 1.3rem;">울산/전국 기온 ${temp}°C (${text})</h3>
+          <span style="font-size: 0.85rem; color: #fbbf24; font-weight: bold;">☀️ 실시간 기상청 날씨 정보 (${region})</span>
+          <h3 style="margin: 4px 0 0 0; font-size: 1.3rem;">현재 기온 ${temp}°C (${text})</h3>
         </div>
         <div style="text-align: right; font-size: 0.9rem; color: #94a3b8;">
           풍속: ${wind} km/h<br>
-          <span style="font-size: 0.75rem; color: #34d399;">● 자동 업데이트 완료</span>
+          <span style="font-size: 0.75rem; color: #34d399;">● 자동 GPS 수신</span>
         </div>
       </div>
     `;
@@ -116,7 +138,7 @@ function renderWeatherWidget(temp, text, wind) {
 
 /* ===== Global Functions ===== */
 
-// 1. 카테고리 바 생성
+// 1. 카테고리
 function renderCategoryNav() {
   const catNav = document.getElementById('categoryNav');
   if (!catNav) return;
@@ -140,7 +162,7 @@ window.setCategory = function (category) {
   renderArticles();
 };
 
-// 2. 모달 제어
+// 2. 모달 제어 (상세보기 오류 수정 완)
 window.openLoginModal = function () {
   const modal = document.getElementById('loginModal');
   if (modal) modal.classList.add('active');
@@ -187,8 +209,9 @@ window.closeWriteModal = function () {
   editingArticleId = null;
 };
 
+// 상세 모달 열기
 window.openDetailModal = function (articleId) {
-  const article = articles.find(a => a.id === articleId);
+  const article = articles.find(a => a.id === Number(articleId));
   if (!article) return;
 
   article.views = (article.views || 0) + 1;
@@ -196,25 +219,33 @@ window.openDetailModal = function (articleId) {
   renderArticles();
 
   const modal = document.getElementById('detailModal');
-  const body = document.getElementById('detailModalBody');
+  let body = document.getElementById('detailModalBody');
   const icon = getCategoryIcon(article.category);
+
+  // 컨테이너가 없으면 모달 내부에 자동 보장 생성
+  if (!body && modal) {
+    body = document.createElement('div');
+    body.id = 'detailModalBody';
+    modal.querySelector('.modal-content')?.appendChild(body);
+  }
 
   if (body) {
     body.innerHTML = `
-      ${article.image ? `<img src="${article.image}" class="detail-hero-img" alt="${article.title}">` : ''}
+      ${article.image ? `<img src="${article.image}" style="width: 100%; max-height: 350px; object-fit: cover; border-radius: 8px; margin-bottom: 16px;" alt="${article.title}">` : ''}
       <div class="detail-body">
-        <div class="detail-category">
+        <div style="margin-bottom: 12px;">
           <span class="badge badge-${article.category}">${icon} ${article.category}</span>
         </div>
-        <h2 class="detail-title">${article.title}</h2>
-        <div class="detail-meta">
-          <span>작성자: <strong>${article.author}</strong></span>
+        <h2 style="font-size: 1.5rem; margin-bottom: 12px; color: #f8fafc; line-height: 1.4;">${article.title}</h2>
+        <div style="font-size: 0.85rem; color: #94a3b8; margin-bottom: 20px; display: flex; gap: 8px; align-items: center;">
+          <span>작성자: <strong style="color: #e2e8f0;">${article.author}</strong></span>
           <span>•</span>
           <span>${article.date}</span>
           <span>•</span>
           <span>조회수 ${article.views}</span>
         </div>
-        <div class="detail-content" style="white-space: pre-line;">${article.content}</div>
+        <hr style="border: none; border-top: 1px solid rgba(255,255,255,0.1); margin-bottom: 20px;">
+        <div style="font-size: 1rem; color: #cbd5e1; line-height: 1.7; white-space: pre-line;">${article.content}</div>
       </div>
     `;
   }
@@ -222,12 +253,13 @@ window.openDetailModal = function (articleId) {
   if (modal) modal.classList.add('active');
 };
 
+// 상세 모달 닫기
 window.closeDetailModal = function () {
   const modal = document.getElementById('detailModal');
   if (modal) modal.classList.remove('active');
 };
 
-// 3. 기사 삭제 및 수정
+// 3. 기사 삭제/수정
 window.deleteArticle = function (id, event) {
   if (event) event.stopPropagation();
 
@@ -238,7 +270,7 @@ window.deleteArticle = function (id, event) {
 
   if (!confirm('정말 이 기사를 삭제하시겠습니까?')) return;
 
-  articles = articles.filter(a => a.id !== id);
+  articles = articles.filter(a => a.id !== Number(id));
   localStorage.setItem('articles', JSON.stringify(articles));
   renderArticles();
   showToast('기사가 삭제되었습니다.', 'info');
@@ -297,7 +329,7 @@ function renderArticles() {
       <div class="empty-state">
         <div class="empty-icon">📰</div>
         <div class="empty-title">등록된 기사가 없습니다</div>
-        <div class="empty-desc">${isAdmin ? '새 기사 작성 버튼을 눌러 첫 기사를 작성해 보세요!' : '기사가 아직 등록되지 않았습니다.'}</div>
+        <div class="empty-desc">${isAdmin ? '새 기사 작성 버튼을 눌러 첫 기사를 작성해 보세요!' : '등록된 기사가 없습니다.'}</div>
         ${isAdmin ? `<button class="btn btn-gold" onclick="openWriteModal()">기사 작성하기</button>` : ''}
       </div>
     `;
@@ -347,6 +379,15 @@ function setupEventListeners() {
     });
   }
 
+  // 모달 외부 어두운 배경 바깥을 누르거나 닫기 버튼 누를 때 모달 닫히게 설정
+  document.querySelectorAll('.modal').forEach(modal => {
+    modal.addEventListener('click', (e) => {
+      if (e.target === modal || e.target.classList.contains('close-btn') || e.target.closest('.modal-close')) {
+        modal.classList.remove('active');
+      }
+    });
+  });
+
   // 로그인 폼
   const loginForm = document.getElementById('loginForm');
   if (loginForm) {
@@ -368,7 +409,7 @@ function setupEventListeners() {
     });
   }
 
-  // 기사 작성/수정 폼 (파일 직접 업로드 처리 포함)
+  // 기사 작성/수정 폼 (파일 첨부 지원)
   const articleForm = document.getElementById('articleForm');
   if (articleForm) {
     articleForm.addEventListener('submit', async (e) => {
@@ -388,12 +429,11 @@ function setupEventListeners() {
 
       let finalImage = urlImage;
 
-      // 컴퓨터에서 첨부한 사진 파일이 있을 경우 Base64 인코딩 변환
       if (fileInput && fileInput.files && fileInput.files[0]) {
         try {
           finalImage = await readImageFile(fileInput.files[0]);
         } catch (err) {
-          console.error('파일 업로드 오류', err);
+          console.error('파일 읽기 실패', err);
         }
       }
 
@@ -428,7 +468,6 @@ function setupEventListeners() {
   }
 }
 
-// 이미지 파일을 Read
 function readImageFile(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
