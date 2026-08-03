@@ -138,7 +138,7 @@ function renderHeroSection() {
       <p style="color:var(--text-secondary,#94a3b8); font-size:0.95rem; line-height:1.6; margin-bottom:12px;">${mainArticle.summary || mainArticle.content.substring(0, 120)}...</p>
       <div style="font-size:0.8rem; color:var(--text-muted,#64748b); display:flex; justify-content:space-between;">
         <span>${mainArticle.author} · ${mainArticle.date}</span>
-        <span>👁️ ${mainArticle.views || 0}회</span>
+        <span>👀 ${mainArticle.views || 0}회</span>
       </div>
     </div>
   `;
@@ -240,7 +240,7 @@ window.openDetailModal = async function (articleId) {
         <div style="padding: 20px;">
           <div style="margin-bottom: 12px; display: flex; justify-content: space-between; align-items: center;">
             <span style="background: rgba(255,255,255,0.08); border:1px solid var(--border-color); color: var(--accent-gold); padding: 4px 10px; border-radius: 20px; font-size: 0.85rem;">${icon} ${article.category}</span>
-            <span style="font-size: 0.85rem; color: var(--text-muted);">👁️ 조회수 ${article.views || 0}회</span>
+            <span style="font-size: 0.85rem; color: var(--text-muted);">👀 조회수 ${article.views || 0}회</span>
           </div>
           
           <h2 style="font-size: 1.5rem; margin-bottom: 12px; line-height: 1.4; font-weight: 700;">${article.title}</h2>
@@ -340,7 +340,7 @@ function renderArticles() {
           <h3 style="margin: 8px 0; font-size: 1.1rem; color: var(--text-primary, #fff);">${article.title}</h3>
           <p style="color: var(--text-secondary, #94a3b8); font-size: 0.9rem; margin-bottom: 12px;">${article.summary || article.content.substring(0, 70)}...</p>
           <div style="display: flex; justify-content: space-between; align-items: center; font-size: 0.8rem; color: var(--text-muted, #64748b);">
-            <span>${article.author} • ${article.date} • 👁️ ${article.views || 0}</span>
+            <span>${article.author} • ${article.date} • 👀 ${article.views || 0}</span>
             ${currentUser ? `
               <div style="display: flex; gap: 6px;">
                 <button onclick="editArticle(${article.id}, event)" style="background:none; border:none; cursor:pointer;">✏️</button>
