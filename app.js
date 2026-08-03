@@ -1,6 +1,14 @@
+// ==========================================
+// 🔗 백엔드 서버 주소 설정
+// ==========================================
+// 예: 로컬 서버 사용 시 -> 'http://localhost:3000'
+// 예: 외부/클라우드 서버 사용 시 -> 'https://your-domain.com'
+// 예: Express에서 HTML/JS를 같이 호스팅하는 경우 -> '' (빈 문자열)
+const API_BASE_URL = 'http://dc.wrd.kr:26894';
+
 let articles = [];
 
-// 페이지 로드 시 초기화
+// 페이지 로드 시 초기화 및 데이터 불러오기
 document.addEventListener('DOMContentLoaded', () => {
   checkAuth();
   fetchArticles();
@@ -26,13 +34,14 @@ function checkAuth() {
   }
 }
 
+// 로그인 처리
 async function handleLogin(e) {
   e.preventDefault();
   const idInput = document.getElementById('loginId').value;
   const pwInput = document.getElementById('loginPw').value;
 
   try {
-    const res = await fetch('/api/auth/login', {
+    const res = await fetch(`${API_BASE_URL}/api/auth/login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ username: idInput, password: pwInput })
@@ -54,6 +63,7 @@ async function handleLogin(e) {
   }
 }
 
+// 로그아웃 처리
 function handleLogout() {
   localStorage.removeItem('token');
   localStorage.removeItem('user');
@@ -63,9 +73,11 @@ function handleLogout() {
 }
 
 // --- 게시글 CRUD ---
+
+// 게시글 목록 불러오기
 async function fetchArticles() {
   try {
-    const res = await fetch('/api/articles');
+    const res = await fetch(`${API_BASE_URL}/api/articles`);
     articles = await res.json();
     renderArticles(articles);
   } catch (err) {
@@ -73,6 +85,7 @@ async function fetchArticles() {
   }
 }
 
+// 게시글 렌더링
 function renderArticles(list) {
   const container = document.getElementById('articleList');
   if (!container) return;
@@ -106,6 +119,7 @@ function renderArticles(list) {
   });
 }
 
+// 게시글 작성 및 수정 저장
 async function saveArticle(e) {
   e.preventDefault();
   const token = localStorage.getItem('token');
@@ -118,7 +132,7 @@ async function saveArticle(e) {
 
   const payload = { category, title, content };
   const method = id ? 'PUT' : 'POST';
-  const url = id ? `/api/articles/${id}` : '/api/articles';
+  const url = id ? `${API_BASE_URL}/api/articles/${id}` : `${API_BASE_URL}/api/articles`;
 
   try {
     const res = await fetch(url, {
@@ -143,12 +157,13 @@ async function saveArticle(e) {
   }
 }
 
+// 게시글 삭제
 async function deleteArticle(id) {
   if (!confirm('정말 삭제하시겠습니까?')) return;
   const token = localStorage.getItem('token');
 
   try {
-    const res = await fetch(`/api/articles/${id}`, {
+    const res = await fetch(`${API_BASE_URL}/api/articles/${id}`, {
       method: 'DELETE',
       headers: { 'Authorization': `Bearer ${token}` }
     });
@@ -165,6 +180,7 @@ async function deleteArticle(id) {
   }
 }
 
+// 게시글 수정 폼 채우기
 function editArticle(id) {
   const article = articles.find(a => a.id === id);
   if (!article) return;
@@ -177,7 +193,7 @@ function editArticle(id) {
   openModal('writeModal');
 }
 
-// 모달 제어
+// UI 모달 제어
 function openModal(modalId) {
   document.getElementById(modalId).style.display = 'block';
 }
@@ -186,6 +202,7 @@ function closeModal(modalId) {
   document.getElementById(modalId).style.display = 'none';
 }
 
+// XSS 방지용 HTML 문자열 이스케이프
 function escapeHtml(str) {
   if (!str) return '';
   return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
