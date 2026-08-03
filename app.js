@@ -1,7 +1,7 @@
 // ==========================================
-// ⚙️ 서버 주소 설정
+// ⚙️ 서버 주소 설정 (필요시 도메인 변경)
 // ==========================================
-const SERVER_URL = 'https://se-eaib.onrender.com'; // <- 원하시는 서버 URL 입력
+const SERVER_URL = 'http://localhost:3000';
 const API_BASE = `${SERVER_URL}/api`;
 
 /* ===== App State ===== */
@@ -11,7 +11,7 @@ let articles = [];
 let currentCategory = '전체';
 let searchQuery = '';
 let editingArticleId = null;
-let currentImageBase64 = ''; // 💡 [추가] 업로드된 이미지 Base64 저장 변수
+let currentImageBase64 = ''; // 업로드된 이미지 저장 변수
 
 // 카테고리 설정
 const categories = [
@@ -34,14 +34,14 @@ document.addEventListener('DOMContentLoaded', () => {
   renderHeaderUserUI();
   setupEventListeners();
 
-  // 1. 기상청/날씨 데이터 자동 불러오기 & 스탯바 렌더링
+  // 1. 기상청/날씨 데이터 불러오기
   fetchKMAWeather();
 
   // 2. 서버에서 기사 목록 가져오기
   fetchArticles();
 });
 
-/* ===== 🌤️ 기상청 / 날씨 데이터 자동 연동 ===== */
+/* ===== 🌤️ 기상청 / 날씨 연동 ===== */
 async function fetchKMAWeather() {
   const statsBar = document.getElementById('statsBar');
   if (!statsBar) return;
@@ -74,7 +74,7 @@ async function fetchKMAWeather() {
   }
 }
 
-/* ===== 다크 / 라이트 테마 설정 ===== */
+/* ===== 테마 설정 ===== */
 function initTheme() {
   const savedTheme = localStorage.getItem('theme');
   const themeBtn = document.getElementById('themeBtn');
@@ -103,7 +103,7 @@ window.toggleTheme = function () {
   }
 };
 
-/* ===== 서버 API 연동 (기사 목록 가져오기) ===== */
+/* ===== 기사 목록 가져오기 ===== */
 async function fetchArticles() {
   try {
     const res = await fetch(`${API_BASE}/articles`);
@@ -131,12 +131,15 @@ function renderHeroSection() {
       <h1 style="font-size: 1.6rem; margin: 12px 0 8px; color:#fff;">${icon} ${mainArticle.title}</h1>
       ${mainArticle.imageUrl ? `<img src="${mainArticle.imageUrl}" style="width:100%; max-height:300px; object-fit:cover; border-radius:8px; margin-bottom:12px;" />` : ''}
       <p style="color:var(--text-secondary,#94a3b8); font-size:0.95rem; line-height:1.6; margin-bottom:12px;">${mainArticle.summary || mainArticle.content.substring(0, 120)}...</p>
-      <div style="font-size:0.8rem; color:var(--text-muted,#64748b);">${mainArticle.author} · ${mainArticle.date}</div>
+      <div style="font-size:0.8rem; color:var(--text-muted,#64748b); display:flex; justify-content:space-between;">
+        <span>${mainArticle.author} · ${mainArticle.date}</span>
+        <span>👁️ ${mainArticle.views || 0}회</span>
+      </div>
     </div>
   `;
 }
 
-/* ===== 전역 모달 제어 함수 ===== */
+/* ===== 전역 모달 제어 ===== */
 window.closeModal = function (modalId) {
   const modal = document.getElementById(modalId);
   if (modal) {
@@ -171,7 +174,7 @@ window.openWriteModal = function (articleId = null) {
   const form = document.getElementById('articleForm');
 
   editingArticleId = articleId;
-  clearImagePreview(); // 작성 모달 열 때 이미지 초기화
+  clearImagePreview();
 
   if (articleId) {
     const article = articles.find(a => a.id === Number(articleId));
@@ -182,7 +185,6 @@ window.openWriteModal = function (articleId = null) {
       if (document.getElementById('artAuthor')) document.getElementById('artAuthor').value = article.author;
       if (document.getElementById('artContent')) document.getElementById('artContent').value = article.content;
       
-      // 기존 기사의 이미지가 있다면 미리보기 표시
       if (article.imageUrl) {
         currentImageBase64 = article.imageUrl;
         showImagePreview(article.imageUrl);
@@ -208,49 +210,67 @@ window.closeWriteModal = function () {
   clearImagePreview();
 };
 
-/* ===== 기사 상세 보기 모달 (💡 이미지 표시 수정) ===== */
-window.openDetailModal = function (articleId) {
-  const article = articles.find(a => a.id === Number(articleId));
-  if (!article) return;
+/* ===== 기사 상세 보기 (조회수 +1 연동) ===== */
+window.openDetailModal = async function (articleId) {
+  try {
+    // 백엔드로 상세 조회를 요청해 조회수를 +1 시키고 최신 데이터 수신
+    const res = await fetch(`${API_BASE}/articles/${articleId}`);
+    if (!res.ok) throw new Error('기사를 불러오지 못했습니다.');
+    
+    const article = await res.json();
 
-  const modal = document.getElementById('detailModal');
-  const detailContent = document.getElementById('detailContent');
-  const icon = getCategoryIcon(article.category);
+    // 메인 데이터 갱신 및 화면 최신화
+    const index = articles.findIndex(a => a.id === Number(articleId));
+    if (index !== -1) {
+      articles[index] = article;
+      renderArticles();
+      renderHeroSection();
+    }
 
-  if (detailContent) {
-    detailContent.innerHTML = `
-      <div style="padding: 20px;">
-        <div style="margin-bottom: 12px;">
-          <span style="background: rgba(255,255,255,0.08); border:1px solid var(--border-color); color: var(--accent-gold); padding: 4px 10px; border-radius: 20px; font-size: 0.85rem;">${icon} ${article.category}</span>
-        </div>
-        <h2 style="font-size: 1.5rem; margin-bottom: 12px; line-height: 1.4; font-weight: 700;">${article.title}</h2>
-        <div style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 20px; display: flex; gap: 8px; align-items: center; border-bottom: 1px solid var(--border-color); padding-bottom: 12px;">
-          <span>작성자: <strong style="color: var(--text-primary);">${article.author}</strong></span>
-          <span>•</span>
-          <span>${article.date}</span>
-        </div>
+    const modal = document.getElementById('detailModal');
+    const detailContent = document.getElementById('detailContent');
+    const icon = getCategoryIcon(article.category);
 
-        ${article.imageUrl ? `
-          <div style="margin-bottom:20px; text-align:center;">
-            <img src="${article.imageUrl}" alt="기사 이미지" style="max-width:100%; max-height:400px; border-radius:12px; border:1px solid var(--border-color);" />
+    if (detailContent) {
+      detailContent.innerHTML = `
+        <div style="padding: 20px;">
+          <div style="margin-bottom: 12px; display: flex; justify-content: space-between; align-items: center;">
+            <span style="background: rgba(255,255,255,0.08); border:1px solid var(--border-color); color: var(--accent-gold); padding: 4px 10px; border-radius: 20px; font-size: 0.85rem;">${icon} ${article.category}</span>
+            <span style="font-size: 0.85rem; color: var(--text-muted);">👁️ 조회수 ${article.views || 0}회</span>
           </div>
-        ` : ''}
-
-        <div style="font-size: 1rem; color: var(--text-secondary); line-height: 1.8; white-space: pre-line; margin-bottom: 24px;">${article.content}</div>
-
-        ${currentUser ? `
-          <div style="display: flex; justify-content: flex-end; gap: 10px; border-top: 1px solid var(--border-color); padding-top: 16px;">
-            <button class="btn btn-ghost" onclick="editArticle(${article.id}, event)" style="font-size: 0.85rem; padding: 8px 14px;">✏️ 수정</button>
-            <button class="btn" onclick="deleteArticle(${article.id}, event)" style="background: rgba(232,85,85,0.15); color: #f87171; border: 1px solid rgba(232,85,85,0.3); font-size: 0.85rem; padding: 8px 14px;">🗑️ 삭제</button>
+          
+          <h2 style="font-size: 1.5rem; margin-bottom: 12px; line-height: 1.4; font-weight: 700;">${article.title}</h2>
+          
+          <div style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 20px; display: flex; gap: 8px; align-items: center; border-bottom: 1px solid var(--border-color); padding-bottom: 12px;">
+            <span>작성자: <strong style="color: var(--text-primary);">${article.author}</strong></span>
+            <span>•</span>
+            <span>${article.date}</span>
           </div>
-        ` : ''}
-      </div>
-    `;
-  }
 
-  if (modal) {
-    modal.style.display = 'flex';
-    modal.classList.add('active');
+          ${article.imageUrl ? `
+            <div style="margin-bottom:20px; text-align:center;">
+              <img src="${article.imageUrl}" alt="기사 이미지" style="max-width:100%; max-height:400px; border-radius:12px; border:1px solid var(--border-color);" />
+            </div>
+          ` : ''}
+
+          <div style="font-size: 1rem; color: var(--text-secondary); line-height: 1.8; white-space: pre-line; margin-bottom: 24px;">${article.content}</div>
+
+          ${currentUser ? `
+            <div style="display: flex; justify-content: flex-end; gap: 10px; border-top: 1px solid var(--border-color); padding-top: 16px;">
+              <button class="btn btn-ghost" onclick="editArticle(${article.id}, event)" style="font-size: 0.85rem; padding: 8px 14px;">✏️ 수정</button>
+              <button class="btn" onclick="deleteArticle(${article.id}, event)" style="background: rgba(232,85,85,0.15); color: #f87171; border: 1px solid rgba(232,85,85,0.3); font-size: 0.85rem; padding: 8px 14px;">🗑️ 삭제</button>
+            </div>
+          ` : ''}
+        </div>
+      `;
+    }
+
+    if (modal) {
+      modal.style.display = 'flex';
+      modal.classList.add('active');
+    }
+  } catch (err) {
+    showToast(err.message, 'error');
   }
 };
 
@@ -277,7 +297,7 @@ window.setCategory = function (category) {
   renderArticles();
 };
 
-/* ===== 기사 목록 렌더링 (💡 카드 이미지 추가) ===== */
+/* ===== 기사 목록 렌더링 ===== */
 function renderArticles() {
   const grid = document.getElementById('articlesGrid');
   if (!grid) return;
@@ -316,7 +336,7 @@ function renderArticles() {
           <h3 style="margin: 8px 0; font-size: 1.1rem; color: var(--text-primary, #fff);">${article.title}</h3>
           <p style="color: var(--text-secondary, #94a3b8); font-size: 0.9rem; margin-bottom: 12px;">${article.summary || article.content.substring(0, 70)}...</p>
           <div style="display: flex; justify-content: space-between; align-items: center; font-size: 0.8rem; color: var(--text-muted, #64748b);">
-            <span>${article.author} • ${article.date}</span>
+            <span>${article.author} • ${article.date} • 👁️ ${article.views || 0}</span>
             ${currentUser ? `
               <div style="display: flex; gap: 6px;">
                 <button onclick="editArticle(${article.id}, event)" style="background:none; border:none; cursor:pointer;">✏️</button>
@@ -330,7 +350,7 @@ function renderArticles() {
   }).join('');
 }
 
-/* ===== 삭제 ===== */
+/* ===== 게시글 삭제 ===== */
 window.deleteArticle = async function (id, event) {
   if (event) event.stopPropagation();
 
@@ -353,14 +373,14 @@ window.deleteArticle = async function (id, event) {
   }
 };
 
-/* ===== 수정 ===== */
+/* ===== 게시글 수정 ===== */
 window.editArticle = function (id, event) {
   if (event) event.stopPropagation();
   window.closeModal('detailModal');
   window.openWriteModal(id);
 };
 
-/* ===== 헤더 UI ===== */
+/* ===== 헤더 UI 렌더링 ===== */
 function renderHeaderUserUI() {
   const userArea = document.getElementById('userArea');
   const loginBtn = document.getElementById('loginBtn');
@@ -381,7 +401,7 @@ function renderHeaderUserUI() {
   }
 }
 
-/* ===== 이벤트 리스너 바인딩 ===== */
+/* ===== 이벤트 리스너 설정 ===== */
 function setupEventListeners() {
   const searchInput = document.getElementById('searchInput');
   if (searchInput) {
@@ -391,7 +411,7 @@ function setupEventListeners() {
     });
   }
 
-  // 💡 [추가] 이미지 선택 파일 읽기 (Base64 변환)
+  // 이미지 선택 및 Base64 인코딩 파일 읽기
   const imageInput = document.getElementById('imageInput');
   if (imageInput) {
     imageInput.addEventListener('change', (e) => {
@@ -411,7 +431,7 @@ function setupEventListeners() {
     });
   }
 
-  // 모달 배경 클릭 시 닫기
+  // 모달 오버레이 클릭 시 닫기
   document.querySelectorAll('.modal-overlay').forEach(overlay => {
     overlay.addEventListener('click', (e) => {
       if (e.target === overlay) {
@@ -470,7 +490,7 @@ function setupEventListeners() {
     });
   }
 
-  // 💡 [수정] 기사 작성/수정 폼 제출 (imageUrl 포함 전송)
+  // 기사 작성/수정 폼 제출
   const articleForm = document.getElementById('articleForm');
   if (articleForm) {
     articleForm.addEventListener('submit', async (e) => {
@@ -501,7 +521,7 @@ function setupEventListeners() {
             title, 
             content, 
             summary,
-            imageUrl: currentImageBase64 || null // 💡 이미지 데이터 함께 전송
+            imageUrl: currentImageBase64 || null
           })
         });
 
@@ -529,7 +549,7 @@ window.logout = function () {
   showToast('로그아웃 되었습니다.', 'info');
 };
 
-/* ===== 이미지 미리보기 보여주기 ===== */
+/* ===== 이미지 미리보기 구현 ===== */
 function showImagePreview(src) {
   const previewContainer = document.getElementById('imagePreviewContainer');
   const uploadArea = document.getElementById('uploadArea');
@@ -540,7 +560,6 @@ function showImagePreview(src) {
   if (uploadArea) uploadArea.style.display = 'none';
 }
 
-/* ===== 이미지 미리보기 초기화 ===== */
 window.clearImagePreview = function () {
   const input = document.getElementById('imageInput');
   const previewContainer = document.getElementById('imagePreviewContainer');
@@ -552,7 +571,7 @@ window.clearImagePreview = function () {
   if (uploadArea) uploadArea.style.display = 'block';
 };
 
-/* ===== 🔔 토스트 알림 ===== */
+/* ===== 토스트 메시지 ===== */
 function showToast(message, type = 'info') {
   let container = document.getElementById('toastContainer');
   if (!container) return;
