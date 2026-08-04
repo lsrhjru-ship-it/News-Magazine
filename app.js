@@ -1,7 +1,7 @@
 // ==========================================
 // ⚙️ 서버 주소 설정 (Render 백엔드 주소 적용)
 // ==========================================
-const SERVER_URL = 'https://lsrhjru.wisp.uno';
+const SERVER_URL = 'https://se-ne6u2n54u-lsrhjru-ship-its-projects.vercel.app';
 const API_BASE = `${SERVER_URL}/api`;
 
 /* ===== App State ===== */
