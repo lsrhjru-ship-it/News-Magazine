@@ -1,5 +1,5 @@
 // ==========================================
-// ⚙️ 서버 주소 설정 (Wispbyte 서버 주소 적용)
+// ⚙️ 서버 주소 설정 (Render 백엔드 주소 적용)
 // ==========================================
 const SERVER_URL = 'https://se-eaib.onrender.com';
 const API_BASE = `${SERVER_URL}/api`;
@@ -41,7 +41,7 @@ document.addEventListener('DOMContentLoaded', () => {
   fetchArticles();
 });
 
-/* ===== 🌤️ 기상청 / 날씨 데이터 자동 연동 (안정화 적용) ===== */
+/* ===== 🌤️ 기상청 / 날씨 데이터 자동 연동 ===== */
 async function fetchKMAWeather() {
   const statsBar = document.getElementById('statsBar');
   if (!statsBar) return;
@@ -125,12 +125,7 @@ window.toggleTheme = function () {
 /* ===== 서버 API 연동 (기사 목록 가져오기) ===== */
 async function fetchArticles() {
   try {
-    const res = await fetch(`${API_BASE}/articles`, {
-      headers: {
-        'Bypass-Tunnel-Reminder': 'true',
-        'ngrok-skip-browser-warning': 'true'
-      }
-    });
+    const res = await fetch(`${API_BASE}/articles`);
     if (!res.ok) throw new Error('목록 조회 실패');
     articles = await res.json();
 
