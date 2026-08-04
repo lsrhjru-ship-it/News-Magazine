@@ -1,7 +1,7 @@
 // ==========================================
 // ⚙️ 서버 주소 설정 (Wispbyte 서버 주소 적용)
 // ==========================================
-const SERVER_URL = 'https://lsrhjru.wisp.uno';
+const SERVER_URL = 'https://se-eaib.onrender.com';
 const API_BASE = `${SERVER_URL}/api`;
 
 /* ===== App State ===== */
