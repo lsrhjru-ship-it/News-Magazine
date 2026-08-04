@@ -1,7 +1,7 @@
 // ==========================================
 // ⚙️ 서버 주소 설정 (필요시 도메인 변경)
 // ==========================================
-const SERVER_URL = 'https://se-eaib.onrender.com';
+const SERVER_URL = 'https://lsrhjru.wisp.uno/';
 const API_BASE = `${SERVER_URL}/api`;
 
 /* ===== App State ===== */
