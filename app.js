@@ -39,7 +39,37 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // 2. 서버에서 기사 목록 가져오기
   fetchArticles();
+
+  // 3. 접속자 위치 기반 날씨 기사 자동 등록 및 요청
+  autoGenerateLocalWeatherArticle();
 });
+
+/* ===== 📍 사용자의 위치 기반 날씨 기사 자동 요청 ===== */
+async function autoGenerateLocalWeatherArticle() {
+  if (!navigator.geolocation) return;
+
+  navigator.geolocation.getCurrentPosition(async (position) => {
+    const lat = position.coords.latitude;
+    const lon = position.coords.longitude;
+
+    try {
+      const res = await fetch(`${API_BASE}/articles/auto-weather`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ latitude: lat, longitude: lon })
+      });
+
+      if (res.ok) {
+        // 새 기사가 등록된 경우 기사 목록 갱신
+        fetchArticles();
+      }
+    } catch (err) {
+      console.error('지역 맞춤 날씨 기사 자동 등록 실패:', err);
+    }
+  }, (err) => {
+    console.log('위치 권한 미허용: 기본 수도권 날씨 기사가 유지됩니다.');
+  });
+}
 
 /* ===== 🌤️ 기상청 / 날씨 데이터 자동 연동 ===== */
 async function fetchKMAWeather() {
@@ -47,7 +77,6 @@ async function fetchKMAWeather() {
   if (!statsBar) return;
 
   try {
-    // Open-Meteo API (서울 좌표: 위도 37.5665, 경도 126.9780)
     const res = await fetch(
       'https://api.open-meteo.com/v1/forecast?latitude=37.5665&longitude=126.9780&current_weather=true&hourly=relativehumidity_2m'
     );
@@ -58,7 +87,6 @@ async function fetchKMAWeather() {
     const weatherCode = data.current_weather.weathercode;
     const humidity = data.hourly?.relativehumidity_2m?.[0] || 60;
 
-    // Weather Code 변환 함수
     const getWeatherDesc = (code) => {
       if (code === 0) return '☀️ 맑음';
       if (code >= 1 && code <= 3) return '⛅ 구름조금 / 구름많음';
