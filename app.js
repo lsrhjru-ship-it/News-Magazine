@@ -12,6 +12,7 @@ let currentCategory = '전체';
 let searchQuery = '';
 let editingArticleId = null;
 let currentImageBase64 = ''; // 업로드된 이미지 Base64 저장 변수
+let currentVideoBase64 = ''; // ✅ 업로드된 영상 Base64 저장 변수
 
 // 카테고리 설정
 const categories = [
@@ -172,11 +173,16 @@ function renderHeroSection() {
   const mainArticle = articles[0];
   const icon = getCategoryIcon(mainArticle.category);
 
+  // ✅ 영상이 있으면 영상을, 없으면 이미지를 대표 미디어로 표시
+  const mediaHtml = mainArticle.videoUrl
+    ? `<video src="${mainArticle.videoUrl}" controls style="width:100%; max-height:300px; border-radius:8px; margin-bottom:12px; background:#000;" onclick="event.stopPropagation()"></video>`
+    : (mainArticle.imageUrl ? `<img src="${mainArticle.imageUrl}" style="width:100%; max-height:300px; object-fit:cover; border-radius:8px; margin-bottom:12px;" />` : '');
+
   heroSection.innerHTML = `
     <div onclick="openDetailModal(${mainArticle.id})" style="cursor:pointer; border-radius:16px; padding:24px; background: linear-gradient(135deg, rgba(30,41,59,0.9), rgba(15,23,42,0.9)); border: 1px solid var(--border-color); margin-bottom: 24px;">
       <span style="background:var(--accent-gold, #fbbf24); color:#000; font-weight:bold; font-size:0.75rem; padding:3px 10px; border-radius:12px;">🔥 주요 뉴스</span>
       <h1 style="font-size: 1.6rem; margin: 12px 0 8px; color:#fff;">${icon} ${mainArticle.title}</h1>
-      ${mainArticle.imageUrl ? `<img src="${mainArticle.imageUrl}" style="width:100%; max-height:300px; object-fit:cover; border-radius:8px; margin-bottom:12px;" />` : ''}
+      ${mediaHtml}
       <p style="color:var(--text-secondary,#94a3b8); font-size:0.95rem; line-height:1.6; margin-bottom:12px;">${mainArticle.summary || mainArticle.content.substring(0, 120)}...</p>
       <div style="font-size:0.8rem; color:var(--text-muted,#64748b);">${mainArticle.author} · ${mainArticle.date}</div>
     </div>
@@ -189,6 +195,9 @@ window.closeModal = function (modalId) {
   if (modal) {
     modal.classList.remove('active', 'open', 'show');
     modal.style.display = 'none';
+
+    // ✅ 모달을 닫을 때 재생 중인 영상은 정지
+    modal.querySelectorAll('video').forEach(v => v.pause());
   }
 };
 
@@ -219,6 +228,7 @@ window.openWriteModal = function (articleId = null) {
 
   editingArticleId = articleId;
   clearImagePreview();
+  clearVideoPreview();
 
   if (articleId) {
     const article = articles.find(a => a.id === Number(articleId));
@@ -232,6 +242,12 @@ window.openWriteModal = function (articleId = null) {
       if (article.imageUrl) {
         currentImageBase64 = article.imageUrl;
         showImagePreview(article.imageUrl);
+      }
+
+      // ✅ 기존 영상 불러오기
+      if (article.videoUrl) {
+        currentVideoBase64 = article.videoUrl;
+        showVideoPreview(article.videoUrl);
       }
     }
   } else {
@@ -252,6 +268,7 @@ window.closeWriteModal = function () {
   window.closeModal('writeModal');
   editingArticleId = null;
   clearImagePreview();
+  clearVideoPreview();
 };
 
 /* ===== 기사 상세 보기 모달 ===== */
@@ -276,11 +293,15 @@ window.openDetailModal = function (articleId) {
           <span>${article.date}</span>
         </div>
 
-        ${article.imageUrl ? `
+        ${article.videoUrl ? `
+          <div style="margin-bottom:20px; text-align:center;">
+            <video src="${article.videoUrl}" controls style="max-width:100%; max-height:420px; border-radius:12px; border:1px solid var(--border-color); background:#000;"></video>
+          </div>
+        ` : (article.imageUrl ? `
           <div style="margin-bottom:20px; text-align:center;">
             <img src="${article.imageUrl}" alt="기사 이미지" style="max-width:100%; max-height:400px; border-radius:12px; border:1px solid var(--border-color);" />
           </div>
-        ` : ''}
+        ` : '')}
 
         <div style="font-size: 1rem; color: var(--text-secondary); line-height: 1.8; white-space: pre-line; margin-bottom: 24px;">${article.content}</div>
 
@@ -354,9 +375,20 @@ function renderArticles() {
 
   grid.innerHTML = filtered.map(article => {
     const icon = getCategoryIcon(article.category);
+
+    // ✅ 카드 썸네일: 영상이 있으면 재생 아이콘을 얹은 영상 썸네일, 없으면 이미지
+    const cardMediaHtml = article.videoUrl
+      ? `
+        <div style="position:relative; margin-bottom:12px;">
+          <video src="${article.videoUrl}" style="width:100%; height:180px; object-fit:cover; border-radius:8px; background:#000;" muted></video>
+          <div style="position:absolute; inset:0; display:flex; align-items:center; justify-content:center; font-size:2.2rem; text-shadow:0 2px 6px rgba(0,0,0,0.6); pointer-events:none;">▶️</div>
+        </div>
+      `
+      : (article.imageUrl ? `<img src="${article.imageUrl}" style="width:100%; height:180px; object-fit:cover; border-radius:8px; margin-bottom:12px;" />` : '');
+
     return `
       <div class="article-card" onclick="openDetailModal(${article.id})" style="cursor:pointer; border: 1px solid var(--border-color); border-radius: 12px; padding: 16px; background: var(--bg-card, #1e293b); margin-bottom: 16px; overflow:hidden;">
-        ${article.imageUrl ? `<img src="${article.imageUrl}" style="width:100%; height:180px; object-fit:cover; border-radius:8px; margin-bottom:12px;" />` : ''}
+        ${cardMediaHtml}
         <div class="article-card-body">
           <span style="font-size: 0.8rem; color: var(--accent-gold, #fbbf24);">${icon} ${article.category}</span>
           <h3 style="margin: 8px 0; font-size: 1.1rem; color: var(--text-primary, #fff);">${article.title}</h3>
@@ -457,6 +489,31 @@ function setupEventListeners() {
     });
   }
 
+  // ✅ 영상 선택 파일 읽기 (Base64 변환)
+  const videoInput = document.getElementById('videoInput');
+  if (videoInput) {
+    videoInput.addEventListener('change', (e) => {
+      const file = e.target.files[0];
+      if (file) {
+        if (file.size > 50 * 1024 * 1024) {
+          showToast('영상 크기는 최대 50MB까지 가능합니다.', 'error');
+          videoInput.value = '';
+          return;
+        }
+        showToast('영상을 불러오는 중입니다...', 'info');
+        const reader = new FileReader();
+        reader.onload = (event) => {
+          currentVideoBase64 = event.target.result;
+          showVideoPreview(currentVideoBase64);
+        };
+        reader.onerror = () => {
+          showToast('영상을 불러오지 못했습니다.', 'error');
+        };
+        reader.readAsDataURL(file);
+      }
+    });
+  }
+
   // 모달 배경 클릭 시 닫기
   document.querySelectorAll('.modal-overlay').forEach(overlay => {
     overlay.addEventListener('click', (e) => {
@@ -547,7 +604,8 @@ function setupEventListeners() {
             title,
             content,
             summary,
-            imageUrl: currentImageBase64 || null
+            imageUrl: currentImageBase64 || null,
+            videoUrl: currentVideoBase64 || null // ✅ 영상 데이터 전송
           })
         });
 
@@ -594,6 +652,35 @@ window.clearImagePreview = function () {
 
   currentImageBase64 = '';
   if (input) input.value = '';
+  if (previewContainer) previewContainer.style.display = 'none';
+  if (uploadArea) uploadArea.style.display = 'block';
+};
+
+/* ===== ✅ 영상 미리보기 보여주기 ===== */
+function showVideoPreview(src) {
+  const previewContainer = document.getElementById('videoPreviewContainer');
+  const uploadArea = document.getElementById('videoUploadArea');
+  const videoPreview = document.getElementById('videoPreview');
+
+  if (videoPreview) videoPreview.src = src;
+  if (previewContainer) previewContainer.style.display = 'block';
+  if (uploadArea) uploadArea.style.display = 'none';
+}
+
+/* ===== ✅ 영상 미리보기 초기화 ===== */
+window.clearVideoPreview = function () {
+  const input = document.getElementById('videoInput');
+  const previewContainer = document.getElementById('videoPreviewContainer');
+  const uploadArea = document.getElementById('videoUploadArea');
+  const videoPreview = document.getElementById('videoPreview');
+
+  currentVideoBase64 = '';
+  if (input) input.value = '';
+  if (videoPreview) {
+    videoPreview.pause();
+    videoPreview.removeAttribute('src');
+    videoPreview.load();
+  }
   if (previewContainer) previewContainer.style.display = 'none';
   if (uploadArea) uploadArea.style.display = 'block';
 };
