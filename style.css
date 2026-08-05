@@ -686,6 +686,12 @@ body::before {
 }
 
 /* Form Styles */
+.form-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+
 .form-group {
   margin-bottom: 20px;
 }
@@ -787,21 +793,21 @@ body::before {
   height: 36px;
   border: 1px solid rgba(255, 255, 255, 0.2);
   border-radius: 50%;
-  
+
   /* 글래스모피즘 반투명 다크 블러 배경 */
   background: rgba(15, 23, 42, 0.65);
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
-  
+
   color: #f8fafc;
   font-size: 15px;
   font-weight: 600;
   cursor: pointer;
-  
+
   display: flex;
   align-items: center;
   justify-content: center;
-  
+
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
   transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
   z-index: 10;
@@ -869,19 +875,131 @@ body::before {
   color: var(--text-muted);
 }
 
-/* Responsive */
+/* ===== Responsive ===== */
 @media (max-width: 1100px) {
   .articles-grid {
     grid-template-columns: repeat(2, 1fr);
   }
+
+  .hero-section {
+    grid-template-columns: 1fr;
+  }
 }
 
 @media (max-width: 768px) {
+  /* 헤더: 로고+버튼 줄바꿈 허용, 검색창은 아래 줄로 내려서 폭 100% */
+  .header-top {
+    flex-wrap: wrap;
+    height: auto;
+    min-height: 60px;
+    padding: 10px 16px;
+    gap: 10px;
+  }
+
+  .logo-sub {
+    display: none;
+  }
+
+  .header-actions {
+    flex-wrap: wrap;
+    gap: 8px;
+    width: 100%;
+    justify-content: flex-end;
+  }
+
+  .search-container {
+    order: 3;
+    width: 100%;
+  }
+
+  .search-input,
+  .search-input:focus {
+    width: 100%;
+  }
+
+  /* 로그인/기사작성 버튼: 아이콘만 남기고 텍스트는 숨김 */
+  .btn-text {
+    display: none;
+  }
+
+  .btn {
+    padding: 9px 12px;
+  }
+
+  .category-nav-inner {
+    padding: 0 16px;
+  }
+
+  .main {
+    padding: 20px 16px;
+  }
+
+  /* 날씨 등 통계바(JS로 삽입되는 flex row)가 줄바꿈되도록 */
+  #statsBar>div {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .hero-section {
+    grid-template-columns: 1fr;
+    margin-bottom: 28px;
+  }
+
   .articles-grid {
     grid-template-columns: 1fr;
+    gap: 16px;
+  }
+
+  .section-header {
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+
+  /* 모달: 화면 꽉 채우고, 여백 축소 */
+  .modal-overlay {
+    padding: 0;
   }
 
   .modal {
-    max-height: 95vh;
+    max-width: 100%;
+    width: 100%;
+    height: 100%;
+    max-height: 100%;
+    border-radius: 0;
+  }
+
+  .modal-header {
+    padding: 16px 18px;
+  }
+
+  .modal-body,
+  #detailContent {
+    padding: 18px;
+  }
+
+  .form-row {
+    grid-template-columns: 1fr;
+    gap: 0;
+  }
+}
+
+@media (max-width: 420px) {
+  .logo-text {
+    font-size: 18px;
+  }
+
+  .logo-icon {
+    width: 30px;
+    height: 30px;
+    font-size: 15px;
+  }
+
+  .btn-icon {
+    width: 36px;
+    height: 36px;
+  }
+
+  .hero-card-content {
+    padding: 18px;
   }
 }
