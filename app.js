@@ -576,8 +576,12 @@ function setupEventListeners() {
   // 기사 작성/수정 폼 제출
   const articleForm = document.getElementById('articleForm');
   if (articleForm) {
+    let isSubmitting = false; // ✅ 중복 제출 방지 플래그 (영상 업로드처럼 요청이 오래 걸릴 때 두 번 클릭돼도 한 번만 전송)
+
     articleForm.addEventListener('submit', async (e) => {
       e.preventDefault();
+
+      if (isSubmitting) return; // ✅ 이미 처리 중이면 무시
 
       if (!token) {
         showToast('로그인이 필요합니다.', 'error');
@@ -591,6 +595,15 @@ function setupEventListeners() {
 
       const method = editingArticleId ? 'PUT' : 'POST';
       const url = editingArticleId ? `${API_BASE}/articles/${editingArticleId}` : `${API_BASE}/articles`;
+
+      const submitBtn = articleForm.querySelector('button[type="submit"]');
+      const originalBtnText = submitBtn ? submitBtn.textContent : '';
+
+      isSubmitting = true;
+      if (submitBtn) {
+        submitBtn.disabled = true;
+        submitBtn.textContent = '⏳ 저장 중...';
+      }
 
       try {
         const res = await fetch(url, {
@@ -617,6 +630,13 @@ function setupEventListeners() {
         closeWriteModal();
       } catch (err) {
         showToast(err.message || '저장에 실패했습니다.', 'error');
+      } finally {
+        // ✅ 성공/실패와 관계없이 항상 플래그와 버튼 상태를 복구
+        isSubmitting = false;
+        if (submitBtn) {
+          submitBtn.disabled = false;
+          submitBtn.textContent = originalBtnText || '💾 저장하기';
+        }
       }
     });
   }
