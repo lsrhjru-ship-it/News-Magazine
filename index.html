@@ -148,6 +148,27 @@
             </div>
           </div>
 
+          <!-- ✅ 영상 업로드 영역 -->
+          <div class="form-group">
+            <label class="form-label">기사 영상 <span style="color:var(--text-muted);font-weight:400">(선택, 최대 50MB)</span></label>
+
+            <!-- Upload Area -->
+            <div class="image-upload-area" id="videoUploadArea">
+              <input type="file" id="videoInput" accept="video/*" aria-label="영상 파일 선택">
+              <div class="upload-icon">🎬</div>
+              <div class="upload-text">영상을 드래그하거나 클릭하여 업로드</div>
+              <div class="upload-subtext">MP4, WEBM, MOV 지원</div>
+            </div>
+
+            <!-- Preview -->
+            <div id="videoPreviewContainer" style="display:none">
+              <div class="image-preview-container">
+                <video id="videoPreview" class="image-preview" controls style="background:#000"></video>
+                <button type="button" class="image-preview-remove" onclick="clearVideoPreview()" aria-label="영상 제거">✕</button>
+              </div>
+            </div>
+          </div>
+
           <div class="form-footer">
             <button type="button" class="btn btn-ghost" onclick="closeWriteModal()">취소</button>
             <button type="submit" class="btn btn-primary">💾 저장하기</button>
